@@ -59,22 +59,38 @@ defmodule Muex.GitDiff do
   end
 
   @doc """
-  Returns the lines of the working tree that differ from git's index, keyed by
-  absolute path: the changes not staged. Uses `git diff --unified=0 --relative`
-  in `:cd`, honouring `GIT_INDEX_FILE` as `changed_staged/1` does.
+  Returns the absolute paths of the working-tree files that differ from git's
+  index: the files with changes not staged, including those whose only change
+  deletes lines. Uses `git diff --name-only --relative` in `:cd`, honouring
+  `GIT_INDEX_FILE` as `changed_staged/1` does.
   """
-  @spec changed_unstaged(keyword()) :: {:ok, map()} | {:error, String.t()}
-  def changed_unstaged(opts \\ []) do
-    diff([], Keyword.get(opts, :cd, File.cwd!()))
+  @spec unstaged_files(keyword()) :: {:ok, MapSet.t(String.t())} | {:error, String.t()}
+  def unstaged_files(opts \\ []) do
+    cd = Keyword.get(opts, :cd, File.cwd!())
+
+    with {:ok, output} <- git_diff(["--name-only", "-z"], cd) do
+      {:ok, output |> String.split("\0", trim: true) |> MapSet.new(&Path.expand(&1, cd))}
+    end
   end
 
+  # Fixed prefixes override diff.noprefix and diff.mnemonicPrefix, so the
+  # parser always finds `+++ b/<path>`.
   defp diff(selector, cd) do
-    # `--` keeps a ref that is also a file name from being read as a path.
-    args =
-      ["diff", "--no-ext-diff", "--unified=0", "--no-color", "--relative"] ++ selector ++ ["--"]
+    args = ["--unified=0", "--no-color", "--src-prefix=a/", "--dst-prefix=b/"] ++ selector
+
+    with {:ok, output} <- git_diff(args, cd) do
+      {:ok, output |> changed_lines() |> expand_paths(cd)}
+    end
+  end
+
+  # `--no-ext-diff` and `--no-textconv` keep diff drivers from replacing the
+  # source lines. `--` keeps a ref that is also a file name from being read as
+  # a path.
+  defp git_diff(args, cd) do
+    args = ["diff", "--no-ext-diff", "--no-textconv", "--relative"] ++ args ++ ["--"]
 
     case System.cmd("git", args, cd: cd, stderr_to_stdout: true) do
-      {output, 0} -> {:ok, output |> changed_lines() |> expand_paths(cd)}
+      {output, 0} -> {:ok, output}
       {output, _code} -> {:error, String.trim(output)}
     end
   rescue

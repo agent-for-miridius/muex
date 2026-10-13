@@ -177,9 +177,9 @@ defmodule Muex do
   defp check_fully_staged(_files, %Muex.Config{staged: false}), do: :ok
 
   defp check_fully_staged(files, config) do
-    case Muex.GitDiff.changed_unstaged(cd: config.project_root) do
+    case Muex.GitDiff.unstaged_files(cd: config.project_root) do
       {:ok, unstaged} ->
-        case for file <- files, Map.has_key?(unstaged, Path.expand(file.path)), do: file.path do
+        case for file <- files, MapSet.member?(unstaged, Path.expand(file.path)), do: file.path do
           [] ->
             :ok
 

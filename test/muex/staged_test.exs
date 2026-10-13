@@ -89,6 +89,26 @@ defmodule Muex.StagedTest do
     end)
   end
 
+  # Deleting the line above double/1 moves it up one on disk, off the line the
+  # index numbers as staged.
+  test "--staged refuses a file whose only unstaged change is a deletion",
+       %{tmp_dir: tmp_dir} do
+    write_tiny_project!(tmp_dir)
+    write_tiny_lib!(tmp_dir, "a * 2", "a + b", "# note")
+    git!(["add", "."], tmp_dir)
+    git!(["commit", "-q", "-m", "init"], tmp_dir)
+
+    write_tiny_lib!(tmp_dir, "a * 3", "a + b", "# note")
+    git!(["add", "lib/tiny.ex"], tmp_dir)
+    write_tiny_lib!(tmp_dir, "a * 3")
+
+    File.cd!(tmp_dir, fn ->
+      assert {:error, reason} = Muex.run(config!(tmp_dir))
+      assert reason =~ "unstaged changes on top of their staged ones"
+      assert reason =~ "lib/tiny.ex"
+    end)
+  end
+
   # An unreachable seam is exactly the code no test executes. Its mutants are
   # ignored before coverage could call them no_coverage.
   test "an ignored line no test executes is ignored, not no_coverage, under --coverage-guided",

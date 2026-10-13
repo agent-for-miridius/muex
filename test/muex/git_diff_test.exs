@@ -263,6 +263,64 @@ defmodule Muex.GitDiffTest do
       assert GitDiff.changed_staged(cd: project) ==
                {:ok, %{Path.join(project, "calc.ex") => MapSet.new([1])}}
     end
+
+    # A textconv driver would number the lines of its converted text, here one
+    # line further down than the source.
+    test "numbers the source lines, not a textconv driver's output", %{dir: dir} do
+      file = Path.join(dir, "calc.ex")
+      File.write!(file, "one\ntwo\nthree\n")
+      File.write!(Path.join(dir, ".gitattributes"), "*.ex diff=header\n")
+
+      git!(
+        ["config", "diff.header.textconv", "awk 'NR == 1 { print \"HEADER\" } { print }'"],
+        dir
+      )
+
+      git!(["add", "."], dir)
+      git!(["commit", "-q", "-m", "init"], dir)
+
+      File.write!(file, "one\nCHANGED\nthree\n")
+      git!(["add", "."], dir)
+
+      assert GitDiff.changed_staged(cd: dir) == {:ok, %{file => MapSet.new([2])}}
+    end
+
+    # diff.mnemonicPrefix names the staged side `i/` rather than `b/`.
+    test "names files whatever diff prefixes git is configured with", %{dir: dir} do
+      file = Path.join(dir, "calc.ex")
+      File.write!(file, "one\n")
+      git!(["add", "."], dir)
+      git!(["commit", "-q", "-m", "init"], dir)
+      git!(["config", "diff.mnemonicPrefix", "true"], dir)
+
+      File.write!(file, "CHANGED\n")
+      git!(["add", "."], dir)
+
+      assert GitDiff.changed_staged(cd: dir) == {:ok, %{file => MapSet.new([1])}}
+    end
+  end
+
+  describe "unstaged_files/1 (real git)" do
+    @describetag :tmp_dir
+
+    setup :init_repo
+
+    # A deletion leaves no line to name, but the file on disk still differs
+    # from the index.
+    test "names a file whose only unstaged change deletes lines", %{dir: dir} do
+      deleted = Path.join(dir, "deleted.ex")
+      staged = Path.join(dir, "staged.ex")
+      File.write!(deleted, "one\ntwo\n")
+      File.write!(staged, "one\n")
+      git!(["add", "."], dir)
+      git!(["commit", "-q", "-m", "init"], dir)
+
+      File.write!(deleted, "one\n")
+      File.write!(staged, "CHANGED\n")
+      git!(["add", "staged.ex"], dir)
+
+      assert GitDiff.unstaged_files(cd: dir) == {:ok, MapSet.new([deleted])}
+    end
   end
 
   describe "filter_mutations/2" do
