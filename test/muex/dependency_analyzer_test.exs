@@ -63,6 +63,60 @@ defmodule Muex.DependencyAnalyzerTest do
         assert Map.get(result, module) == [test_file]
       end
     end
+
+    # Under --coverage-guided, lines `:cover` has no data for (a `def` header, a
+    # `do:` body on its own line) are given the tests this map names. A test that
+    # only passes the module as a value, as a LiveView test does with
+    # `live_isolated(conn, MyAppWeb.PageLive)`, must still be named, or those
+    # lines' mutants survive although the test would kill them.
+    @tag :tmp_dir
+    test "keys modules referenced only as values", %{tmp_dir: tmp_dir} do
+      test_file = Path.join(tmp_dir, "value_reference_test.exs")
+
+      File.write!(test_file, """
+      defmodule ValueReferenceTest do
+        use ExUnit.Case
+
+        test "renders" do
+          live_isolated(conn, MyAppWeb.PageLive)
+          assert %MyApp.Struct{} = build()
+          start_supervised!({MyApp.Worker, []})
+        end
+      end
+      """)
+
+      result = DependencyAnalyzer.analyze(tmp_dir)
+
+      for module <- [MyAppWeb.PageLive, MyApp.Struct, MyApp.Worker] do
+        assert Map.get(result, module) == [test_file]
+      end
+    end
+
+    @tag :tmp_dir
+    test "keys modules referenced through an alias by their full name", %{tmp_dir: tmp_dir} do
+      test_file = Path.join(tmp_dir, "aliased_reference_test.exs")
+
+      File.write!(test_file, """
+      defmodule AliasedReferenceTest do
+        use ExUnit.Case
+        alias MyAppWeb.Live
+        alias MyApp.Workers, as: W
+        alias MyApp.{Structs}
+
+        test "renders" do
+          live_isolated(conn, Live.PageLive)
+          start_supervised!({W.Worker, []})
+          assert %Structs.Thing{} = build()
+        end
+      end
+      """)
+
+      result = DependencyAnalyzer.analyze(tmp_dir)
+
+      for module <- [MyAppWeb.Live.PageLive, MyApp.Workers.Worker, MyApp.Structs.Thing] do
+        assert Map.get(result, module) == [test_file]
+      end
+    end
   end
 
   describe "get_dependent_tests/2" do

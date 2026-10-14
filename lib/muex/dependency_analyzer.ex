@@ -98,51 +98,70 @@ defmodule Muex.DependencyAnalyzer do
     end
   end
 
-  # Walk AST and extract module references
+  # Walk AST and extract module references: every module name the file writes,
+  # wherever it appears (a directive, a remote call, an argument, a struct), so a
+  # test that only passes a module as a value is still selected for it.
   @dialyzer {:nowarn_function, extract_modules_from_ast: 1}
   @spec extract_modules_from_ast(Macro.t()) :: [Macro.t()]
   defp extract_modules_from_ast(ast) do
+    aliases = collect_aliases(ast)
+
     {_ast, modules} =
       Macro.prewalk(ast, MapSet.new(), fn node, acc ->
-        modules = extract_module_from_node(node)
+        modules = extract_module_from_node(node, aliases)
         {node, MapSet.union(acc, modules)}
       end)
 
     MapSet.to_list(modules)
   end
 
-  # Extract module names from different AST node patterns
+  # Map each name the file's `alias` directives bind to the alias parts it
+  # stands for: `alias MyApp.Foo` binds :Foo, `alias MyApp.Foo, as: Bar` binds
+  # :Bar, `alias MyApp.{Foo, Bar.Baz}` binds :Foo and :Baz. Aliases are taken
+  # file-wide rather than per lexical scope; that can only select a test for an
+  # extra module, never miss one, since the unexpanded name is kept too.
+  defp collect_aliases(ast) do
+    {_ast, aliases} =
+      Macro.prewalk(ast, %{}, fn node, acc ->
+        {node, Enum.into(aliases_bound_by(node), acc)}
+      end)
 
-  # alias MyApp.{Foo, Bar.Baz}
-  defp extract_module_from_node(
-         {:alias, _, [{{:., _, [{:__aliases__, _, base}, :{}]}, _, children} | _opts]}
-       ) do
-    for {:__aliases__, _, parts} <- children,
-        into: MapSet.new(),
-        do: module_from_parts(base ++ parts)
+    aliases
   end
 
-  defp extract_module_from_node(node) do
+  defp aliases_bound_by(
+         {:alias, _, [{{:., _, [{:__aliases__, _, base}, :{}]}, _, children} | _opts]}
+       ) do
+    for {:__aliases__, _, parts} <- children, do: {List.last(parts), base ++ parts}
+  end
+
+  defp aliases_bound_by({:alias, _, [{:__aliases__, _, parts} | opts]}) do
+    name =
+      with [opts] when is_list(opts) <- opts,
+           {:__aliases__, _, [name]} <- Keyword.get(opts, :as) do
+        name
+      else
+        _ -> List.last(parts)
+      end
+
+    [{name, parts}]
+  end
+
+  defp aliases_bound_by(_node), do: []
+
+  # Extract module names from different AST node patterns
+  defp extract_module_from_node(node, aliases) do
     case node do
-      # alias MyModule
-      {:alias, _, [{:__aliases__, _, parts}]} ->
-        MapSet.new([module_from_parts(parts)])
+      # MyModule, MyApp.MyModule, or Aliased.MyModule (also expanded through the
+      # alias that binds Aliased)
+      {:__aliases__, _, [head | rest] = parts} ->
+        expanded =
+          case Map.fetch(aliases, head) do
+            {:ok, target} -> [module_from_parts(target ++ rest)]
+            :error -> []
+          end
 
-      # alias MyModule.SubModule
-      {:alias, _, [{:__aliases__, _, parts}, _opts]} ->
-        MapSet.new([module_from_parts(parts)])
-
-      # import MyModule
-      {:import, _, [{:__aliases__, _, parts}]} ->
-        MapSet.new([module_from_parts(parts)])
-
-      # import MyModule, only: [...]
-      {:import, _, [{:__aliases__, _, parts}, _opts]} ->
-        MapSet.new([module_from_parts(parts)])
-
-      # MyModule.function()
-      {{:., _, [{:__aliases__, _, parts}, _function]}, _, _args} ->
-        MapSet.new([module_from_parts(parts)])
+        MapSet.new([module_from_parts(parts) | expanded])
 
       # describe "MyModule" - extract from string if it looks like a module
       {:describe, _, [module_string, _block]} when is_binary(module_string) ->
