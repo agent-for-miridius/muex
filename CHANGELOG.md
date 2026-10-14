@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Coverage Export Notices**: With `--coverage-guided`, `:cover`'s merged coverage file paths and import notices are printed only with `--verbose`.
 - **Clause Deletion Locations**: Case, cond, and with clause-deletion mutants are now reported on the deleted clause's own line (`->`, or `<-` for `with`), so `--since` and `--staged` can scope deletions to changed clauses rather than the enclosing `case`, `cond`, or `with` line.
 - **Function-Based Complexity Filtering**: `--min-complexity` (`min_complexity`, default `2`) now uses the containing function's cyclomatic complexity (`:function_complexity`) instead of the replacement node, so literals and removed calls are no longer always scored as `1`; mutations outside functions use their own node, and decision points in `do:` keyword bodies are counted.
+- **Tests Naming a Module Only as a Value**: Dependency analysis tied a test file to a module only through `alias`, `import` or a remote call, so a test passing the module as a value, as in `live_isolated(conn, MyAppWeb.PageLive)`, was not selected for it. When another test named the module, only that test ran and the mutant could survive; with `--coverage-guided`, this hit lines without coverage data, such as a `def` header. Every module name a test file writes now counts, including in arguments, structs and tuples, and a name starting with an alias is also counted under the module it expands to.
 
 ## [0.10.0] - 2026-09-12
 

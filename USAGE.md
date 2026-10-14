@@ -781,7 +781,7 @@ Skipped 20 file(s) (low complexity or framework code)
 Muex analyzes your test suite to understand dependencies between tests and source modules. This enables intelligent test execution:
 
 **How it works:**
-1. Muex scans test files for module references (imports, aliases, direct calls)
+1. Muex scans test files for module references (every module name written, expanded through aliases)
 2. Builds a dependency map: module → [test_files]
 3. For each mutation, runs only tests that depend on the mutated module
 

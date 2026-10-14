@@ -225,7 +225,7 @@ Muex offers the richest CLI and configuration:
 - Benchmark on Calculator project (76 LOC, 20 tests): 85 mutations reduced to 31 (63.5% reduction), score preserved at 100%
 
 **Test Dependency Analysis** (`Muex.DependencyAnalyzer`):
-- Parses test files to extract module references (aliases, imports, function calls, describe/test strings)
+- Parses test files to extract module references (every module name written, expanded through aliases, plus describe/test strings)
 - Runs only tests that depend on the mutated module
 - Falls back to full test suite when no dependencies found
 

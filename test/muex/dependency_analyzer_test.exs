@@ -64,11 +64,6 @@ defmodule Muex.DependencyAnalyzerTest do
       end
     end
 
-    # Under --coverage-guided, lines `:cover` has no data for (a `def` header, a
-    # `do:` body on its own line) are given the tests this map names. A test that
-    # only passes the module as a value, as a LiveView test does with
-    # `live_isolated(conn, MyAppWeb.PageLive)`, must still be named, or those
-    # lines' mutants survive although the test would kill them.
     @tag :tmp_dir
     test "keys modules referenced only as values", %{tmp_dir: tmp_dir} do
       test_file = Path.join(tmp_dir, "value_reference_test.exs")

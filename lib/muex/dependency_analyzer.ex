@@ -98,9 +98,7 @@ defmodule Muex.DependencyAnalyzer do
     end
   end
 
-  # Walk AST and extract module references: every module name the file writes,
-  # wherever it appears (a directive, a remote call, an argument, a struct), so a
-  # test that only passes a module as a value is still selected for it.
+  # Walk AST and extract module references
   @dialyzer {:nowarn_function, extract_modules_from_ast: 1}
   @spec extract_modules_from_ast(Macro.t()) :: [Macro.t()]
   defp extract_modules_from_ast(ast) do
@@ -116,10 +114,8 @@ defmodule Muex.DependencyAnalyzer do
   end
 
   # Map each name the file's `alias` directives bind to the alias parts it
-  # stands for: `alias MyApp.Foo` binds :Foo, `alias MyApp.Foo, as: Bar` binds
-  # :Bar, `alias MyApp.{Foo, Bar.Baz}` binds :Foo and :Baz. Aliases are taken
-  # file-wide rather than per lexical scope; that can only select a test for an
-  # extra module, never miss one, since the unexpanded name is kept too.
+  # stands for. Aliases are taken file-wide rather than per lexical scope; that
+  # can only select a test for an extra module, which is harmless.
   defp collect_aliases(ast) do
     {_ast, aliases} =
       Macro.prewalk(ast, %{}, fn node, acc ->
