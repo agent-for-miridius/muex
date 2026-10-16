@@ -113,13 +113,20 @@ defmodule Muex.DependencyAnalyzer do
     MapSet.to_list(modules)
   end
 
-  # Map each name the file's `alias` directives bind to the alias parts it
-  # stands for. Aliases are taken file-wide rather than per lexical scope; that
-  # can only select a test for an extra module, which is harmless.
+  # Map each name the file's `alias` directives bind to the alias parts of every
+  # module it stands for anywhere in the file. Aliases are taken file-wide
+  # rather than per lexical scope, so a reference is expanded through each
+  # binding of its name, including ones outside its scope; that can only select
+  # a test for an extra module, which is harmless.
   defp collect_aliases(ast) do
     {_ast, aliases} =
       Macro.prewalk(ast, %{}, fn node, acc ->
-        {node, Enum.into(aliases_bound_by(node), acc)}
+        acc =
+          Enum.reduce(aliases_bound_by(node), acc, fn {name, target}, bound ->
+            Map.update(bound, name, [target], &[target | &1])
+          end)
+
+        {node, acc}
       end)
 
     aliases
@@ -149,13 +156,10 @@ defmodule Muex.DependencyAnalyzer do
   defp extract_module_from_node(node, aliases) do
     case node do
       # MyModule, MyApp.MyModule, or Aliased.MyModule (also expanded through the
-      # alias that binds Aliased)
+      # aliases that bind Aliased)
       {:__aliases__, _, [head | rest] = parts} ->
         expanded =
-          case Map.fetch(aliases, head) do
-            {:ok, target} -> [module_from_parts(target ++ rest)]
-            :error -> []
-          end
+          for target <- Map.get(aliases, head, []), do: module_from_parts(target ++ rest)
 
         MapSet.new([module_from_parts(parts) | expanded])
 

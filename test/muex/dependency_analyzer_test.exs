@@ -112,6 +112,33 @@ defmodule Muex.DependencyAnalyzerTest do
         assert Map.get(result, module) == [test_file]
       end
     end
+
+    @tag :tmp_dir
+    test "keys a name every module it is aliased to in the file", %{tmp_dir: tmp_dir} do
+      test_file = Path.join(tmp_dir, "shadowed_alias_test.exs")
+
+      File.write!(test_file, """
+      defmodule ShadowedAliasTest do
+        use ExUnit.Case
+
+        defmodule First do
+          alias MyApp.A.Foo
+          def call, do: Foo.Child.run()
+        end
+
+        defmodule Second do
+          alias MyApp.B.Foo
+          def call, do: Foo.Child.run()
+        end
+      end
+      """)
+
+      result = DependencyAnalyzer.analyze(tmp_dir)
+
+      for module <- [MyApp.A.Foo.Child, MyApp.B.Foo.Child] do
+        assert Map.get(result, module) == [test_file]
+      end
+    end
   end
 
   describe "get_dependent_tests/2" do
