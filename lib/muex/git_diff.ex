@@ -85,13 +85,14 @@ defmodule Muex.GitDiff do
 
   # `--no-ext-diff` and `--no-textconv` keep diff drivers from replacing the
   # source lines. `--` keeps a ref that is also a file name from being read as
-  # a path.
+  # a path. git's stderr is left to reach the terminal: merged into stdout, a
+  # warning such as core.autocrlf's would be read as part of the diff.
   defp git_diff(args, cd) do
     args = ["diff", "--no-ext-diff", "--no-textconv", "--relative"] ++ args ++ ["--"]
 
-    case System.cmd("git", args, cd: cd, stderr_to_stdout: true) do
+    case System.cmd("git", args, cd: cd) do
       {output, 0} -> {:ok, output}
-      {output, _code} -> {:error, String.trim(output)}
+      {_output, code} -> {:error, "git exited with status #{code}; its error is printed above"}
     end
   rescue
     e -> {:error, Exception.message(e)}

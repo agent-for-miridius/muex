@@ -321,6 +321,20 @@ defmodule Muex.GitDiffTest do
 
       assert GitDiff.unstaged_files(cd: dir) == {:ok, MapSet.new([deleted])}
     end
+
+    # With core.autocrlf=input, git warns on stderr that it will replace the
+    # CRLF line endings; read as output, that warning would hide the path.
+    test "names a file git warns about", %{dir: dir} do
+      file = Path.join(dir, "calc.ex")
+      git!(["config", "core.autocrlf", "input"], dir)
+      File.write!(file, "one\n")
+      git!(["add", "."], dir)
+      git!(["commit", "-q", "-m", "init"], dir)
+
+      File.write!(file, "one\r\ntwo\r\n")
+
+      assert GitDiff.unstaged_files(cd: dir) == {:ok, MapSet.new([file])}
+    end
   end
 
   describe "filter_mutations/2" do
