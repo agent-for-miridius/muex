@@ -13,6 +13,6 @@ defmodule Mix.Tasks.MuexTest do
 
   test "mix muex passes when zero mutations are tested and fail-at is 0" do
     # If fail-at is 0, score 0.0% is not below threshold 0%
-    assert MuexTask.run(["--files", "non_existent_dir_12345", "--fail-at", "0"]) == nil
+    assert MuexTask.run(["--files", "non_existent_dir_12345", "--fail-at", "0"]) == :ok
   end
 end

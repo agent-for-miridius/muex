@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Elixir 1.16 Required**: muex now requires Elixir 1.16 or later, up from 1.14.
 
 ### Fixed
+- **Escript Runs**: The escript built by `mix escript.build` failed every mutation run with `module Mix is not available`, and once given Mix, with `Could not find a Mix.Project`. It now bundles Mix and loads the project's `mix.exs` and config before compiling. Like `mix muex`, it fails a run with no mutants to score when `--fail-at` is above 0.
 - **Git Hook Environment for Mix Subprocesses**: muex now unsets Git’s repository-local environment variables for every `mix` subprocess. This prevents project tests that create throwaway Git repositories from acting on the repository being committed to when muex runs from a hook.
 - **Coverage Export Cleanup**: Coverage-guided runs now delete each test file’s coverage export after merging it, and also clean it up when the test run fails. muex removes `cover/` if it created the directory and it is empty, while leaving files already in `cover/` alone.
 - **`--since` in a Subdirectory**: For a project that is not at the top of its git repository, such as an umbrella inside a monorepo, `--since` matched no files and generated no mutations. The diff now names files from the project root, and relative and absolute `--files` paths both match.

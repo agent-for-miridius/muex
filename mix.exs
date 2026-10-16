@@ -35,7 +35,7 @@ defmodule Muex.MixProject do
 
   def application do
     [
-      extra_applications: [:logger, :syntax_tools, :tools],
+      extra_applications: [:logger, :mix, :syntax_tools, :tools],
       mod: {Muex.Application, []}
     ]
   end

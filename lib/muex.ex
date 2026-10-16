@@ -97,6 +97,24 @@ defmodule Muex do
     end
   end
 
+  @doc """
+  Checks a `run/1` result against the `--fail-at` threshold.
+
+  Fails when the low bound of the score is below `fail_at`.
+  """
+  @spec check_threshold(map(), number()) :: :ok | {:error, String.t()}
+  def check_threshold(%{score_low: score_low, score_high: score_high}, fail_at)
+      when score_low < fail_at do
+    score_str =
+      if score_low == score_high,
+        do: "#{score_low}%",
+        else: "#{score_low}%..#{score_high}%"
+
+    {:error, "Mutation score #{score_str} is below threshold #{fail_at}%"}
+  end
+
+  def check_threshold(_result, _fail_at), do: :ok
+
   # An unwritable --output path is refused before any mutant runs, not after the
   # whole run has been spent. The probe creates the file only to prove it can,
   # and removes it again unless it was already there.

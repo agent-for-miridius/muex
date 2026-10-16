@@ -48,32 +48,24 @@ defmodule Muex.CLI do
         end
 
         Mix.start()
+        # An escript is not started by `mix`, so it loads the project itself.
+        Code.compile_file("mix.exs")
+        Mix.Task.run("loadconfig")
         Mix.Task.run("loadpaths")
         Mix.Task.run("compile", ["--no-deps-check"])
 
         case Muex.run(config) do
-          {:ok, %{results: []}} ->
-            # No mutations were generated (e.g. --since with no mutable changes).
-            # There is nothing to score, so the run passes the gate.
-            IO.puts("No mutations to test; nothing to score.")
-            System.halt(0)
+          {:ok, result} ->
+            if result.results == [], do: IO.puts("No mutations to test; nothing to score.")
 
-          {:ok, %{score_low: score_low, score_high: score_high}} ->
-            if score_low < config.fail_at do
-              score_str =
-                if score_low == score_high,
-                  do: "#{score_low}%",
-                  else: "#{score_low}%..#{score_high}%"
+            case Muex.check_threshold(result, config.fail_at) do
+              :ok ->
+                System.halt(0)
 
-              IO.puts(
-                :stderr,
-                "Mutation score #{score_str} is below threshold #{config.fail_at}%"
-              )
-
-              System.halt(1)
+              {:error, reason} ->
+                IO.puts(:stderr, reason)
+                System.halt(1)
             end
-
-            System.halt(0)
 
           {:error, reason} ->
             IO.puts(:stderr, "Error: #{reason}")
