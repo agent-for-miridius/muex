@@ -202,9 +202,11 @@ defmodule Muex.Mutator do
       of a default are never offered. The parameters, default values and
       guard are traversed.
 
-  Inside a pattern, such as a definition's parameter, the walk sets
-  `context[:pattern]` to `true`, so a mutator can leave alone what is only
-  valid as an expression.
+  Inside a pattern the walk sets `context[:pattern]` to `true`, so a mutator
+  can leave alone what is only valid as an expression. Patterns are a
+  definition's parameters, the left of `=` and `<-`, and the left of `->`
+  except in `cond` and a `receive`'s `after`. A guard is an expression. The
+  `<<>>` of a bitstring generator (`for <<b <- bin>>`) is not offered.
 
   Callers can prune additional framework DSL calls by passing a list of
   call names (atoms) in `context[:skip_calls]`. For example,
@@ -244,12 +246,22 @@ defmodule Muex.Mutator do
     if skip?(node, skip_calls) do
       []
     else
-      context = context |> update_line(node) |> update_function(node)
+      context = context |> update_line(node) |> update_function(node) |> update_arrows(node)
 
-      mutate_node(node, mutators, context, path) ++
-        collect_children(node, mutators, context, skip_calls, path)
+      mutations =
+        case bitstring_generator?(node) do
+          true -> []
+          false -> mutate_node(node, mutators, context, path)
+        end
+
+      mutations ++ collect_children(node, mutators, context, skip_calls, path)
     end
   end
+
+  # `for <<byte <- bin>>`: the `<<>>` marks a bitstring generator and is not a
+  # value, so only what is inside it is offered.
+  defp bitstring_generator?({:<<>>, _meta, [{:<-, _, _}]}), do: true
+  defp bitstring_generator?(_node), do: false
 
   defp mutate_node(node, mutators, context, path) do
     Enum.flat_map(mutators, fn mutator ->
@@ -346,6 +358,45 @@ defmodule Muex.Mutator do
        |> Enum.flat_map(fn {node, index} ->
          collect(node, mutators, context, skip_calls, below(path, [2, index]))
        end))
+  end
+
+  # Match: `pattern = value`. The value keeps the enclosing context: inside a
+  # pattern it is a pattern too.
+  defp collect_children({:=, _meta, [left, right]}, mutators, context, skip_calls, path) do
+    collect_pattern(left, mutators, context, skip_calls, below(path, [2, 0])) ++
+      collect(right, mutators, context, skip_calls, below(path, [2, 1]))
+  end
+
+  # Generator or `with` clause: `pattern when guard <- value`.
+  defp collect_children({:<-, _meta, [left, right]}, mutators, context, skip_calls, path) do
+    context = Map.delete(context, :pattern)
+
+    collect_guarded(left, mutators, context, skip_calls, below(path, [2, 0])) ++
+      collect(right, mutators, context, skip_calls, below(path, [2, 1]))
+  end
+
+  # Clause: `patterns when guard -> body`, in `case`, `fn`, `receive`, `try`,
+  # `with`'s `else` and `for`'s `reduce:`. A `cond` clause and a `receive`
+  # timeout put an expression on the left instead; see `update_arrows/2`.
+  defp collect_children({:->, _meta, [lefts, body]}, mutators, context, skip_calls, path)
+       when is_list(lefts) do
+    {left_kind, context} = Map.pop(context, :arrow_left, :pattern)
+    context = Map.delete(context, :pattern)
+
+    collect_left =
+      case left_kind do
+        :pattern -> &collect_guarded/5
+        :expression -> &collect/5
+      end
+
+    lefts_mutations =
+      lefts
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {left, index} ->
+        collect_left.(left, mutators, context, skip_calls, below(path, [2, 0, index]))
+      end)
+
+    lefts_mutations ++ collect(body, mutators, context, skip_calls, below(path, [2, 1]))
   end
 
   # Call with an atom form: descend into args only. This mirrors
@@ -445,6 +496,29 @@ defmodule Muex.Mutator do
   defp collect_param(pattern, mutators, context, skip_calls, path),
     do: collect_pattern(pattern, mutators, context, skip_calls, path)
 
+  # A clause's pattern, possibly guarded: `p1, p2 when guard` arrives as one
+  # `when` whose last argument is the guard. The `when` is still offered
+  # (`Muex.Mutator.Guard`) and the guard is walked as an expression.
+  defp collect_guarded({:when, _meta, args} = node, mutators, context, skip_calls, path)
+       when is_list(args) and args != [] do
+    context = update_line(context, node)
+    {patterns, [guard]} = Enum.split(args, -1)
+
+    pattern_mutations =
+      patterns
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {pattern, index} ->
+        collect_pattern(pattern, mutators, context, skip_calls, below(path, [2, index]))
+      end)
+
+    mutate_node(node, mutators, context, path) ++
+      pattern_mutations ++
+      collect(guard, mutators, context, skip_calls, below(path, [2, length(patterns)]))
+  end
+
+  defp collect_guarded(pattern, mutators, context, skip_calls, path),
+    do: collect_pattern(pattern, mutators, context, skip_calls, path)
+
   # Walk a pattern, telling mutators so through `context[:pattern]`.
   defp collect_pattern(pattern, mutators, context, skip_calls, path),
     do: collect(pattern, mutators, Map.put(context, :pattern, true), skip_calls, path)
@@ -489,4 +563,16 @@ defmodule Muex.Mutator do
        do: Map.put(context, :function_complexity, Muex.MutantOptimizer.complexity(node))
 
   defp update_function(context, _node), do: context
+
+  # The clauses of a `cond`, and a `receive`'s `after` clause, put an
+  # expression left of `->` rather than a pattern. Nothing but the keyword
+  # list holding them lies between this node and those `->`s, which consume
+  # the flag.
+  defp update_arrows(context, {:cond, _meta, [[do: [{:->, _, _} | _]]]}),
+    do: Map.put(context, :arrow_left, :expression)
+
+  defp update_arrows(context, {:after, [{:->, _meta, _args} | _]}),
+    do: Map.put(context, :arrow_left, :expression)
+
+  defp update_arrows(context, _node), do: context
 end

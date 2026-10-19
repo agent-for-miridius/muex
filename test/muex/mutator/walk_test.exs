@@ -306,6 +306,65 @@ defmodule Muex.Mutator.WalkTest do
     end
   end
 
+  describe "patterns" do
+    @patterns """
+    defmodule Muex.WalkTest.Patterns do
+      def run(x, bin, xs) do
+        [h | t] = xs
+        "pre" <> rest = bin
+        a = case x do
+          {p, q} when p > q -> p - q
+          [m | n] -> {m, n}
+          _ -> 0
+        end
+        f = fn [c | d] -> {c, d}; "pre" <> s -> s end
+        w = with {:ok, z} <- {:ok, x}, [e | g] <- xs do
+          {z, e, g}
+        else
+          [k | l] -> {k, l}
+        end
+        v = for [i | j] <- [xs], <<b::size(8) <- bin>>, do: {i, j, b}
+        r = receive do
+          {:msg, [aa | bb]} -> {aa, bb}
+        after
+          max(1, 2) -> :timeout
+        end
+        c = cond do
+          max(x, 1) > 2 -> :big
+          true -> :small
+        end
+        tr = try do
+          x
+        catch
+          :throw, [ta | tb] -> {ta, tb}
+        end
+        {h, t, rest, a, f, w, v, r, c, tr}
+      end
+    end
+    """
+
+    test "no mutant of a pattern fails to compile" do
+      # FunctionCall treated `|`, `<>` and `<<>>` in patterns as calls:
+      # removing one unbinds its variables. StatementDeletion and WithClause
+      # delete bindings that later code reads, a different flaw.
+      mutators =
+        Muex.Config.all_mutators() -- [Muex.Mutator.StatementDeletion, Muex.Mutator.WithClause]
+
+      assert invalid_mutants(@patterns, mutators) == []
+    end
+
+    test "guards, `cond` conditions and `after` timeouts are still expressions" do
+      mutations = Mutator.walk(ast!(@patterns), [FunctionCall], %{file: "s.ex"})
+      originals = Enum.map(mutations, &Macro.to_string(&1.original_ast))
+
+      assert "p > q" in originals
+      assert "max(1, 2)" in originals
+      assert "max(x, 1) > 2" in originals
+      refute "h | t" in originals
+      refute "\"pre\" <> rest" in originals
+    end
+  end
+
   describe "configurable skip_calls" do
     test "prunes configured DSL calls, leaving the rest intact" do
       ast =
