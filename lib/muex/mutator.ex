@@ -212,14 +212,16 @@ defmodule Muex.Mutator do
   Inside a pattern the walk sets `context[:pattern]` to `true`, so a mutator
   can leave alone what is only valid as an expression. Patterns are a
   definition's parameters, the left of `=` and `<-`, and the left of `->`
-  except in `cond` and a `receive`'s `after`. A guard is an expression. The
-  `<<>>` of a bitstring generator (`for <<b <- bin>>`) is not offered.
+  except in `cond` and a `receive`'s `after`. A guard is an expression, walked
+  with `context[:guard]` set to `true`. The `<<>>` of a bitstring generator
+  (`for <<b <- bin>>`) is not offered.
 
   A node that cannot be replaced by a value is offered with
   `context[:irreplaceable]` set to `true`. That is the call a pipe feeds
-  (`f(y)` in `x |> f(y)`), which lacks its first argument, and the text of a
-  sigil (`"ab+c"` in `~r/ab+c/i`), which Kernel's sigils require as a string.
-  A sigil's modifiers are not offered.
+  (`f(y)` in `x |> f(y)`), which lacks its first argument, the text of a
+  sigil (`"ab+c"` in `~r/ab+c/i`), which Kernel's sigils require as a string,
+  and the right side of `in` in a guard, which must be a list or range when
+  the guard compiles. A sigil's modifiers are not offered.
 
   Callers can prune additional framework DSL calls by passing a list of
   call names (atoms) in `context[:skip_calls]`. For example,
@@ -476,6 +478,25 @@ defmodule Muex.Mutator do
     lefts_mutations ++ collect(body, mutators, context, skip_calls, below(path, [2, 1]))
   end
 
+  # `left in right` in a guard: `right` must be a list or range when the guard
+  # compiles, so it is walked with `context[:irreplaceable]` set.
+  defp collect_children(
+         {:in, _meta, [left, right]},
+         mutators,
+         %{guard: true} = context,
+         skip_calls,
+         path
+       ) do
+    collect(left, mutators, context, skip_calls, below(path, [2, 0])) ++
+      collect(
+        right,
+        mutators,
+        Map.put(context, :irreplaceable, true),
+        skip_calls,
+        below(path, [2, 1])
+      )
+  end
+
   # Call with an atom form: descend into args only. This mirrors
   # `Macro.traverse/4`, which does not visit the call name itself.
   defp collect_children({form, _meta, args}, mutators, context, skip_calls, path)
@@ -554,7 +575,7 @@ defmodule Muex.Mutator do
 
     mutate_node(node, mutators, context, path) ++
       collect_head(head, mutators, context, skip_calls, below(path, [2, 0])) ++
-      collect(guard, mutators, context, skip_calls, below(path, [2, 1]))
+      collect_guard(guard, mutators, context, skip_calls, below(path, [2, 1]))
   end
 
   defp collect_head({_name, _meta, params} = head, mutators, context, skip_calls, path)
@@ -605,7 +626,7 @@ defmodule Muex.Mutator do
 
     mutate_node(node, mutators, context, path) ++
       pattern_mutations ++
-      collect(guard, mutators, context, skip_calls, below(path, [2, length(patterns)]))
+      collect_guard(guard, mutators, context, skip_calls, below(path, [2, length(patterns)]))
   end
 
   defp collect_guarded(pattern, mutators, context, skip_calls, path),
@@ -614,6 +635,10 @@ defmodule Muex.Mutator do
   # Walk a pattern, telling mutators so through `context[:pattern]`.
   defp collect_pattern(pattern, mutators, context, skip_calls, path),
     do: collect(pattern, mutators, Map.put(context, :pattern, true), skip_calls, path)
+
+  # Walk a guard, telling mutators so through `context[:guard]`.
+  defp collect_guard(guard, mutators, context, skip_calls, path),
+    do: collect(guard, mutators, Map.put(context, :guard, true), skip_calls, path)
 
   # The left operand of `/` in `&(left / arity)` when Elixir reads the capture
   # as a function reference: `:remote` for `Mod.fun` (no arguments), `:local`

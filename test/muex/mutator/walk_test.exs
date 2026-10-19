@@ -468,6 +468,44 @@ defmodule Muex.Mutator.WalkTest do
     end
   end
 
+  describe "`in` in guards" do
+    @guard_ins """
+    defmodule Muex.WalkTest.GuardIns do
+      defguard is_small(v) when v in 1..10
+      def run(x, y) when x in [1, 2] do
+        f = fn z when z not in [3] -> z end
+        case y do
+          z when z in [1, 2] and is_small(z) -> f.(z)
+          _ -> y in [x]
+        end
+      end
+    end
+    """
+
+    test "no mutant of an `in` in a guard fails to compile" do
+      assert invalid_mutants(@guard_ins, Muex.Config.all_mutators()) == []
+    end
+
+    test "outside a guard `in` is still swapped; inside one its right side is still mutated" do
+      mutations = @guard_ins |> ast!() |> Mutator.walk([FunctionCall], %{file: "s.ex"})
+
+      changed =
+        for %{ast: ast, original_ast: original} <- mutations,
+            do: {Macro.to_string(original), ast && Macro.to_string(ast)}
+
+      assert {"y in [x]", "[x] in y"} in changed
+      assert {"1..10", "10..1"} in changed
+      assert {"v in 1..10", nil} in changed
+    end
+
+    test "a module attribute read right of `in` in a guard is not removed" do
+      source = "def run(x) when x in @limits, do: x"
+      mutations = source |> ast!() |> Mutator.walk([FunctionCall], %{file: "s.ex"})
+
+      refute Enum.any?(mutations, &match?(%{original_ast: {:@, _, _}, ast: nil}, &1))
+    end
+  end
+
   describe "configurable skip_calls" do
     test "prunes configured DSL calls, leaving the rest intact" do
       ast =

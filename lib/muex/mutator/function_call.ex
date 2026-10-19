@@ -43,7 +43,7 @@ defmodule Muex.Mutator.FunctionCall do
           mutations = removal("remove #{func}() call", context, line)
 
           mutations =
-            if length(args) >= 2 and swappable?(func) do
+            if length(args) >= 2 and swappable?(func, context) do
               swapped_args = swap_first_two(args)
 
               [
@@ -145,8 +145,10 @@ defmodule Muex.Mutator.FunctionCall do
   defp removal(description, context, line), do: [build_mutation(nil, description, context, line)]
 
   # Kernel's sigils are macros that take the text first and the modifiers
-  # second; swapped, they do not compile.
-  defp swappable?(func), do: not Muex.Mutator.sigil?(func)
+  # second; swapped, they do not compile. Nor does `[1, 2] in x` in a guard,
+  # which needs a list or range on the right when it compiles.
+  defp swappable?(:in, %{guard: true}), do: false
+  defp swappable?(func, _context), do: not Muex.Mutator.sigil?(func)
 
   defp swap_first_two([first, second | rest]) do
     [second, first | rest]
