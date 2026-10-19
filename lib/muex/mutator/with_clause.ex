@@ -6,14 +6,15 @@ defmodule Muex.Mutator.WithClause do
   `<-` clause that removes it while preserving the `do`/`else` block and any
   bare (non-`<-`) expressions.
 
-  Some deletions may produce code that no longer compiles (a later clause or the
-  body referencing the deleted binding); those are reported as invalid mutants
-  by the runner rather than survivors. A clause whose removal compiles *and*
-  passes the suite points at a `with` step the tests do not depend on.
+  A clause that binds a variable a later clause or the `do` body reads is not
+  deleted, unless an earlier clause already bound it: the result would not
+  compile. A clause whose removal passes the suite points at a `with` step the
+  tests do not depend on.
   """
 
   @behaviour Muex.Mutator
 
+  alias Muex.Mutator.Bindings
   alias Muex.Mutator.Builders
 
   @impl true
@@ -39,14 +40,21 @@ defmodule Muex.Mutator.WithClause do
     if block_with_do?(block) and length(arrow_positions) >= 2 do
       rebuild = fn remaining -> {:with, meta, remaining ++ [block]} end
 
-      Builders.clause_deletions(
-        __MODULE__,
+      # Numbered over every `<-` clause, so a label names the same clause
+      # whether or not its neighbours can be deleted.
+      __MODULE__
+      |> Builders.clause_deletions(
         leading,
         arrow_positions,
         rebuild,
         context,
         Keyword.get(meta, :line, 0)
       )
+      |> Enum.zip(arrow_positions)
+      |> Enum.reject(fn {_mutation, position} ->
+        binds_what_later_reads?(leading, position, block)
+      end)
+      |> Enum.map(fn {mutation, _position} -> mutation end)
     else
       []
     end
@@ -55,4 +63,11 @@ defmodule Muex.Mutator.WithClause do
   def mutate(_ast, _context), do: []
 
   defp block_with_do?(block), do: Keyword.keyword?(block) and Keyword.has_key?(block, :do)
+
+  # Whether the clause at `position` binds a variable that a later clause or
+  # the `do` body reads. The `else` clauses never see the `with`'s bindings.
+  defp binds_what_later_reads?(leading, position, block) do
+    {before, [clause | later]} = Enum.split(leading, position)
+    Bindings.binds_what_later_reads?(clause, before, later ++ [Keyword.fetch!(block, :do)])
+  end
 end

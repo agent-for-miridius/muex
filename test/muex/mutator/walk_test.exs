@@ -340,10 +340,7 @@ defmodule Muex.Mutator.WalkTest do
     """
 
     test "no mutant of a pattern fails to compile" do
-      # WithClause still deletes `with` clauses whose bindings the body reads.
-      mutators = Muex.Config.all_mutators() -- [Muex.Mutator.WithClause]
-
-      assert invalid_mutants(@patterns, mutators) == []
+      assert invalid_mutants(@patterns, Muex.Config.all_mutators()) == []
     end
 
     test "guards, `cond` conditions and `after` timeouts are still expressions" do

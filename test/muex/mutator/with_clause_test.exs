@@ -13,7 +13,7 @@ defmodule Muex.Mutator.WithClauseTest do
     test "deletes each <- clause, keeping the do block" do
       a1 = arrow({:ok, {:a, [line: 1], nil}}, {:foo, [line: 1], []}, 1)
       a2 = arrow({:ok, {:b, [line: 1], nil}}, {:bar, [line: 1], []}, 1)
-      kw = [do: {:+, [line: 2], [{:a, [line: 2], nil}, {:b, [line: 2], nil}]}]
+      kw = [do: :done]
       ast = with_node([a1, a2, kw], 1)
 
       mutations = WithClause.mutate(ast, %{file: "test.ex"})
@@ -27,7 +27,7 @@ defmodule Muex.Mutator.WithClauseTest do
       bare = {:=, [line: 1], [{:x, [line: 1], nil}, 1]}
       a1 = arrow({:ok, {:a, [line: 1], nil}}, {:foo, [line: 1], []}, 1)
       a2 = arrow({:ok, {:b, [line: 1], nil}}, {:bar, [line: 1], []}, 1)
-      kw = [do: {:a, [line: 2], nil}]
+      kw = [do: :done]
       ast = with_node([bare, a1, a2, kw], 1)
 
       mutations = WithClause.mutate(ast, %{file: "test.ex"})
@@ -93,13 +93,61 @@ defmodule Muex.Mutator.WithClauseTest do
   test "reports each deletion on the deleted clause's line" do
     ast =
       Code.string_to_quoted!("""
-      with {:ok, a} <- foo(),
-           {:ok, b} <- bar(a) do
-        b
+      with :ok <- foo(),
+           :ok <- bar() do
+        :done
       end
       """)
 
     lines = ast |> WithClause.mutate(%{file: "lib/m.ex"}) |> Enum.map(& &1.location.line)
     assert lines == [1, 2]
+  end
+
+  describe "bindings read later" do
+    defp deletions(source) do
+      source
+      |> Code.string_to_quoted!()
+      |> WithClause.mutate(%{file: "lib/m.ex"})
+      |> Enum.map(&{&1.description, Macro.to_string(&1.ast)})
+    end
+
+    test "keeps a clause whose binding a later clause or the body reads" do
+      # Deleting either clause leaves `a` or `b` undefined.
+      assert deletions("""
+             with {:ok, a} <- foo(), {:ok, b} <- bar(a) do
+               b
+             end
+             """) == []
+    end
+
+    test "deletes a clause whose binding only `else` or nothing reads" do
+      # Labels still count every `<-` clause.
+      assert [{"WithClause: delete clause 2 of 3", _}, {"WithClause: delete clause 3 of 3", _}] =
+               deletions("""
+               with {:ok, a} <- foo(), {:ok, b} <- bar(a), :ok <- baz(a) do
+                 a
+               else
+                 b -> b
+               end
+               """)
+    end
+
+    test "deletes a clause whose binding an earlier clause already made" do
+      assert [{"WithClause: delete clause 2 of 2", _}] =
+               deletions("""
+               with {:ok, a} <- foo(), {:ok, a} <- bar(a) do
+                 a
+               end
+               """)
+    end
+
+    test "a binding by a bare match counts as earlier" do
+      assert [{_, "with a = 1, {:ok, b} <- bar(a) do\n  {a, b}\nend"}] =
+               deletions("""
+               with a = 1, {:ok, a} <- foo(), {:ok, b} <- bar(a) do
+                 {a, b}
+               end
+               """)
+    end
   end
 end
