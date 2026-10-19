@@ -10,7 +10,8 @@ defmodule Muex.Mutator.FunctionCall do
   unbinds its variables, and swapping `"pre" <> rest` makes a binary pattern
   that does not compile. A node the walk marks `:irreplaceable` is not
   removed either: `value |> nil` does not compile (`Muex.Mutator.Pipe` drops
-  the stage), nor does a sigil with `nil` for its text. The arguments of a
+  the stage), nor does a sigil with `nil` for its text, nor `x in nil` in a
+  guard. The arguments of a
   sigil, `raise`, `reraise`, and `in` in a guard are not swapped.
   """
   @behaviour Muex.Mutator
