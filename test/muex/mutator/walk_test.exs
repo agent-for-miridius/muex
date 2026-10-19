@@ -441,6 +441,33 @@ defmodule Muex.Mutator.WalkTest do
     end
   end
 
+  describe "sigils" do
+    @sigils ~S'''
+    defmodule Muex.WalkTest.Sigils do
+      def run(name) do
+        t = ~s(raw #{name} and #{name})
+        {t, Regex.match?(~r/ab+c/i, t), ~w(a b c)a, ~S(upper), ~c"chars"}
+      end
+    end
+    '''
+
+    test "no mutant of a sigil fails to compile" do
+      assert invalid_mutants(@sigils, Muex.Config.all_mutators()) == []
+    end
+
+    test "a sigil can be removed and its text mutated" do
+      mutations = @sigils |> ast!() |> Mutator.walk([FunctionCall, Literal], %{file: "s.ex"})
+
+      changed =
+        for %{ast: ast, original_ast: original} <- mutations,
+            do: {Macro.to_string(original), ast && Macro.to_string(ast)}
+
+      assert {"~r/ab+c/i", nil} in changed
+      assert {"\"ab+c\"", "\"\""} in changed
+      assert {"\"raw \#{name} and \#{name}\"", "\"\#{name}raw  and \#{name}\""} in changed
+    end
+  end
+
   describe "configurable skip_calls" do
     test "prunes configured DSL calls, leaving the rest intact" do
       ast =

@@ -8,8 +8,10 @@ defmodule Muex.Mutator.FunctionCall do
 
   A pattern holds no calls, so nothing in one is mutated. Removing a pattern
   unbinds its variables, and swapping `"pre" <> rest` makes a binary pattern
-  that does not compile. The call a pipe feeds is not removed either, since
-  `value |> nil` does not compile; `Muex.Mutator.Pipe` drops the stage.
+  that does not compile. A node the walk marks `:irreplaceable` is not
+  removed either: `value |> nil` does not compile (`Muex.Mutator.Pipe` drops
+  the stage), nor does a sigil with `nil` for its text. A sigil's arguments
+  are not swapped.
   """
   @behaviour Muex.Mutator
 
@@ -41,7 +43,7 @@ defmodule Muex.Mutator.FunctionCall do
           mutations = removal("remove #{func}() call", context, line)
 
           mutations =
-            if length(args) >= 2 do
+            if length(args) >= 2 and swappable?(func) do
               swapped_args = swap_first_two(args)
 
               [
@@ -139,8 +141,12 @@ defmodule Muex.Mutator.FunctionCall do
     ]
   end
 
-  defp removal(_description, %{pipe_target: true}, _line), do: []
+  defp removal(_description, %{irreplaceable: true}, _line), do: []
   defp removal(description, context, line), do: [build_mutation(nil, description, context, line)]
+
+  # Kernel's sigils are macros that take the text first and the modifiers
+  # second; swapped, they do not compile.
+  defp swappable?(func), do: not Muex.Mutator.sigil?(func)
 
   defp swap_first_two([first, second | rest]) do
     [second, first | rest]

@@ -215,9 +215,11 @@ defmodule Muex.Mutator do
   except in `cond` and a `receive`'s `after`. A guard is an expression. The
   `<<>>` of a bitstring generator (`for <<b <- bin>>`) is not offered.
 
-  The call a pipe feeds (`f(y)` in `x |> f(y)`) is offered with
-  `context[:pipe_target]` set to `true`: it lacks its first argument, so it
-  cannot be replaced by a value.
+  A node that cannot be replaced by a value is offered with
+  `context[:irreplaceable]` set to `true`. That is the call a pipe feeds
+  (`f(y)` in `x |> f(y)`), which lacks its first argument, and the text of a
+  sigil (`"ab+c"` in `~r/ab+c/i`), which Kernel's sigils require as a string.
+  A sigil's modifiers are not offered.
 
   Callers can prune additional framework DSL calls by passing a list of
   call names (atoms) in `context[:skip_calls]`. For example,
@@ -265,7 +267,7 @@ defmodule Muex.Mutator do
           false -> mutate_node(node, mutators, context, path)
         end
 
-      children_context = context |> Map.delete(:pipe_target) |> enter_capture(node)
+      children_context = context |> Map.delete(:irreplaceable) |> enter_capture(node)
       mutations ++ collect_children(node, mutators, children_context, skip_calls, path)
     end
   end
@@ -430,13 +432,13 @@ defmodule Muex.Mutator do
   end
 
   # Pipe: `value |> call(args)`. The call itself is walked with
-  # `context[:pipe_target]` set; its arguments are not.
+  # `context[:irreplaceable]` set; its arguments are not.
   defp collect_children({:|>, _meta, [left, right]}, mutators, context, skip_calls, path) do
     collect(left, mutators, context, skip_calls, below(path, [2, 0])) ++
       collect(
         right,
         mutators,
-        Map.put(context, :pipe_target, true),
+        Map.put(context, :irreplaceable, true),
         skip_calls,
         below(path, [2, 1])
       )
@@ -478,7 +480,11 @@ defmodule Muex.Mutator do
   # `Macro.traverse/4`, which does not visit the call name itself.
   defp collect_children({form, _meta, args}, mutators, context, skip_calls, path)
        when is_atom(form) do
-    collect_args(args, mutators, context, skip_calls, below(path, [2]))
+    if sigil?(form) do
+      collect_sigil(args, mutators, context, skip_calls, below(path, [2]))
+    else
+      collect_args(args, mutators, context, skip_calls, below(path, [2]))
+    end
   end
 
   # Call with a non-atom form (e.g. remote call `{:., _, _}`): descend into
@@ -525,6 +531,17 @@ defmodule Muex.Mutator do
       collect(node, mutators, context, skip_calls, below(path, [index]))
     end)
   end
+
+  # A sigil's arguments: `~r/text/mods` is `sigil_r(<<"text">>, ~c"mods")`.
+  # Kernel's sigils are macros that need the text as `<<>>` and valid
+  # modifiers, so the text is walked with `context[:irreplaceable]` set and
+  # the modifiers not at all.
+  defp collect_sigil([text | _modifiers], mutators, context, skip_calls, path) do
+    context = Map.put(context, :irreplaceable, true)
+    collect(text, mutators, context, skip_calls, below(path, [0]))
+  end
+
+  defp collect_sigil(_args, _mutators, _context, _skip_calls, _path), do: []
 
   # A definition's head. Removing `name(params)` leaves `def nil`, and
   # rewriting it under any other mutator renames or redefines the function
@@ -617,6 +634,12 @@ defmodule Muex.Mutator do
     do: collect(arity, mutators, context, skip_calls, path)
 
   defp collect_arity(:local, _arity, _mutators, _context, _skip_calls, _path), do: []
+
+  @doc """
+  Whether `name` names a sigil, as `:sigil_r` does for `~r/.../`.
+  """
+  @spec sigil?(atom()) :: boolean()
+  def sigil?(name) when is_atom(name), do: String.starts_with?(Atom.to_string(name), "sigil_")
 
   # Module alias segments: pure structural metadata.
   defp skip?({:__aliases__, _meta, _segments}, _skip_calls), do: true
