@@ -216,7 +216,7 @@ defmodule Muex.Mutator.WalkTest do
       assert Enum.any?(mutations, &match?({:|, _meta, _args}, &1.original_ast))
     end
 
-    test "the `/` of a function capture is skipped; its function is mutated, and the arity of a remote capture only, since a missing local arity does not compile" do
+    test "the `/` of a function capture is skipped; its function is walked, and the arity of a remote capture only, since a missing local arity does not compile" do
       # `&Path.dirname/1` and `&double/1` put a `/` under `&` that names the
       # arity. FunctionCall treated it as a call and removed it or swapped its
       # arguments, Arithmetic as division: none of those is a valid capture.
@@ -233,8 +233,8 @@ defmodule Muex.Mutator.WalkTest do
 
       refute Enum.any?(mutations, &match?({:/, _meta, _args}, &1.original_ast))
 
-      # Pre-order: the function before its arity.
-      assert [:dirname, 1, 1] =
+      # A remote function's name is never offered; see "remote calls".
+      assert [1, 1] =
                mutations
                |> Enum.map(& &1.original_ast)
                |> Enum.filter(&(&1 in [:dirname, 1, 2]))
@@ -503,6 +503,32 @@ defmodule Muex.Mutator.WalkTest do
       mutations = source |> ast!() |> Mutator.walk([FunctionCall], %{file: "s.ex"})
 
       refute Enum.any?(mutations, &match?(%{original_ast: {:@, _, _}, ast: nil}, &1))
+    end
+  end
+
+  describe "remote calls" do
+    @remote_calls """
+    defmodule Muex.WalkTest.RemoteCalls do
+      Module.register_attribute(__MODULE__, :acc, accumulate: true)
+      @joined Enum.join(["a", "b"], ",")
+      def run(m, x), do: {@joined, m.key, :erlang.atom_to_binary(x), Enum.map([x], &String.upcase/1)}
+    end
+    """
+
+    test "a remote call's function name is never offered" do
+      mutations = @remote_calls |> ast!() |> Mutator.walk([Literal], %{file: "s.ex"})
+      originals = Enum.map(mutations, & &1.original_ast)
+
+      for name <- [:register_attribute, :join, :atom_to_binary, :map, :upcase],
+          do: refute(name in originals)
+
+      assert :key in originals
+      assert :erlang in originals
+      assert :acc in originals
+    end
+
+    test "no Literal mutant of a remote call fails to compile" do
+      assert invalid_mutants(@remote_calls, [Literal]) == []
     end
   end
 

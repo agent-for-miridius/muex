@@ -208,6 +208,10 @@ defmodule Muex.Mutator do
     * The name of a module attribute being set (`timeout(5_000)` in
       `@timeout 5_000`): `@nil` does not compile. The `@` node and the
       value are traversed.
+    * The function name of a remote call or capture (`join` in
+      `Enum.join(list, ",")`), as a local call's name is not: renamed, it
+      names a function that does not exist. The module and arguments are
+      traversed, and so is the field of a map field access (`m.key`).
 
   Inside a pattern the walk sets `context[:pattern]` to `true`, so a mutator
   can leave alone what is only valid as an expression. Patterns are a
@@ -508,8 +512,34 @@ defmodule Muex.Mutator do
     end
   end
 
-  # Call with a non-atom form (e.g. remote call `{:., _, _}`): descend into
-  # both the form and the args.
+  # Remote call: `Mod.fun(args)`. The function name is not offered, as a local
+  # call's is not: renamed, the call names a function that does not exist,
+  # which fails to compile when the module body calls it. The `.` node, the
+  # module and the arguments are walked. `expr.field` is a map field access,
+  # not a call, so its field is offered as usual.
+  defp collect_children(
+         {{:., _dot_meta, [module, fun]} = dot, meta, args},
+         mutators,
+         context,
+         skip_calls,
+         path
+       )
+       when is_atom(fun) and is_list(args) do
+    dot_mutations =
+      if field_access?(module, meta, args) do
+        collect(dot, mutators, context, skip_calls, below(path, [0]))
+      else
+        dot_context = update_line(context, dot)
+
+        mutate_node(dot, mutators, dot_context, below(path, [0])) ++
+          collect(module, mutators, dot_context, skip_calls, below(path, [0, 2, 0]))
+      end
+
+    dot_mutations ++ collect_args(args, mutators, context, skip_calls, below(path, [2]))
+  end
+
+  # Call with a non-atom form (e.g. an anonymous function call `f.(x)`):
+  # descend into both the form and the args.
   defp collect_children({form, _meta, args}, mutators, context, skip_calls, path) do
     collect(form, mutators, context, skip_calls, below(path, [0])) ++
       collect_args(args, mutators, context, skip_calls, below(path, [2]))
@@ -650,6 +680,18 @@ defmodule Muex.Mutator do
     do: :local
 
   defp function_reference(_left), do: nil
+
+  # `expr.field`: no parentheses, no arguments, and an expression rather than
+  # a module on the left.
+  defp field_access?(module, meta, []) do
+    Keyword.get(meta, :no_parens, false) and not module_name?(module)
+  end
+
+  defp field_access?(_module, _meta, _args), do: false
+
+  defp module_name?({:__aliases__, _meta, _segments}), do: true
+  defp module_name?({:__MODULE__, _meta, context}) when is_atom(context), do: true
+  defp module_name?(module), do: is_atom(module)
 
   # A capture's arity. A remote capture of an arity that does not exist still
   # compiles, so its arity is offered. A local, imported or operator capture
