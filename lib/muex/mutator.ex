@@ -171,6 +171,9 @@ defmodule Muex.Mutator do
     :enforce_keys
   ]
 
+  # Forms whose first argument is a function head rather than a call.
+  @definitions [:def, :defp, :defmacro, :defmacrop, :defguard, :defguardp, :defdelegate]
+
   @doc """
   Walks an AST and collects mutations from all registered mutators.
 
@@ -194,6 +197,14 @@ defmodule Muex.Mutator do
       traversed, never the atom `key`.
     * The `/` of a function capture (`&Mod.fun/arity`, `&fun/arity`),
       which names the arity; the function and the arity are traversed.
+    * The head of a definition (`def`, `defp`, `defmacro`, `defmacrop`,
+      `defguard`, `defguardp`, `defdelegate`): `name(params)` and the `\\`
+      of a default are never offered. The parameters, default values and
+      guard are traversed.
+
+  Inside a pattern, such as a definition's parameter, the walk sets
+  `context[:pattern]` to `true`, so a mutator can leave alone what is only
+  valid as an expression.
 
   Callers can prune additional framework DSL calls by passing a list of
   call names (atoms) in `context[:skip_calls]`. For example,
@@ -324,6 +335,19 @@ defmodule Muex.Mutator do
     end
   end
 
+  # Definition: `def name(params) when guard`. The head is not a call, so no
+  # mutator is offered it; see `collect_head/5`. The body and options are
+  # walked as usual.
+  defp collect_children({kind, _meta, [head | rest]}, mutators, context, skip_calls, path)
+       when kind in @definitions do
+    collect_head(head, mutators, context, skip_calls, below(path, [2, 0])) ++
+      (rest
+       |> Enum.with_index(1)
+       |> Enum.flat_map(fn {node, index} ->
+         collect(node, mutators, context, skip_calls, below(path, [2, index]))
+       end))
+  end
+
   # Call with an atom form: descend into args only. This mirrors
   # `Macro.traverse/4`, which does not visit the call name itself.
   defp collect_children({form, _meta, args}, mutators, context, skip_calls, path)
@@ -375,6 +399,55 @@ defmodule Muex.Mutator do
       collect(node, mutators, context, skip_calls, below(path, [index]))
     end)
   end
+
+  # A definition's head. Removing `name(params)` leaves `def nil`, and
+  # rewriting it under any other mutator renames or redefines the function
+  # rather than changing what it does, so the head node itself is never
+  # offered. A guard's `when` is still offered (`Muex.Mutator.Guard`) and the
+  # guard is walked as an expression. Each parameter is a pattern, apart from
+  # a default value.
+  defp collect_head({:when, _meta, [head, guard]} = node, mutators, context, skip_calls, path) do
+    context = update_line(context, node)
+
+    mutate_node(node, mutators, context, path) ++
+      collect_head(head, mutators, context, skip_calls, below(path, [2, 0])) ++
+      collect(guard, mutators, context, skip_calls, below(path, [2, 1]))
+  end
+
+  defp collect_head({_name, _meta, params} = head, mutators, context, skip_calls, path)
+       when is_list(params) do
+    context = update_line(context, head)
+
+    params
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {param, index} ->
+      collect_param(param, mutators, context, skip_calls, below(path, [2, index]))
+    end)
+  end
+
+  defp collect_head(_head, _mutators, _context, _skip_calls, _path), do: []
+
+  # `pattern \\ default` is not a call either: only its operands are walked,
+  # the pattern as a pattern and the default as an expression.
+  defp collect_param(
+         {:\\, _meta, [pattern, default]} = param,
+         mutators,
+         context,
+         skip_calls,
+         path
+       ) do
+    context = update_line(context, param)
+
+    collect_pattern(pattern, mutators, context, skip_calls, below(path, [2, 0])) ++
+      collect(default, mutators, context, skip_calls, below(path, [2, 1]))
+  end
+
+  defp collect_param(pattern, mutators, context, skip_calls, path),
+    do: collect_pattern(pattern, mutators, context, skip_calls, path)
+
+  # Walk a pattern, telling mutators so through `context[:pattern]`.
+  defp collect_pattern(pattern, mutators, context, skip_calls, path),
+    do: collect(pattern, mutators, Map.put(context, :pattern, true), skip_calls, path)
 
   # The left operand of `/` in `&(left / arity)` when Elixir reads the capture
   # as a function reference: a remote `Mod.fun` (no arguments) or a local `fun`.

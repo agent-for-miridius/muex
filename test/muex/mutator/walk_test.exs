@@ -44,6 +44,40 @@ defmodule Muex.Mutator.WalkTest do
   defp follow(tuple, [index | rest]) when is_tuple(tuple), do: follow(elem(tuple, index), rest)
   defp follow(list, [index | rest]) when is_list(list), do: follow(Enum.at(list, index), rest)
 
+  # Every mutant of `source` under `mutators` that does not compile, as
+  # `{description, line, error}`. `source` must define one module, with a name
+  # no other test compiles.
+  defp invalid_mutants(source, mutators) do
+    ast = ast!(source)
+    entry = %{ast: ast, path: "s.ex"}
+
+    for mutation <- Mutator.walk(ast, mutators, %{file: "s.ex"}),
+        error = compile_error(mutation, entry),
+        do: {mutation.description, mutation.location.line, error}
+  end
+
+  defp compile_error(mutation, entry) do
+    {:ok, source} = Muex.Compiler.compile_to_source(mutation, entry, Muex.Language.Elixir)
+
+    {result, diagnostics} =
+      Code.with_diagnostics([log: false], fn ->
+        try do
+          {:ok, Code.compile_string(source)}
+        rescue
+          error -> {:error, Exception.message(error)}
+        end
+      end)
+
+    case result do
+      {:ok, modules} ->
+        for {module, _binary} <- modules, do: :code.purge(module) && :code.delete(module)
+        nil
+
+      {:error, message} ->
+        [message | for(%{severity: :error} = d <- diagnostics, do: d.message)]
+    end
+  end
+
   describe "line propagation" do
     test "leaf literals inherit the nearest enclosing line" do
       ast =
@@ -232,6 +266,43 @@ defmodule Muex.Mutator.WalkTest do
       mutations = Mutator.walk(ast, [FunctionCall, Arithmetic], %{file: "s.ex"})
 
       assert Enum.any?(mutations, &match?({:/, _meta, _args}, &1.original_ast))
+    end
+  end
+
+  describe "definition heads" do
+    @heads """
+    defmodule Muex.WalkTest.Heads do
+      defguard is_pos(x) when is_integer(x) and x > 0
+      def add(a, b) when is_number(a) and is_number(b), do: a + b
+      defp scale(a, b \\\\ 2), do: a * b
+      def zero(n) when is_pos(n), do: scale(n)
+      def tag({:ok, v}, [h | t]), do: {v, h, t}
+      def bin("pre" <> rest, <<c::size(8), _::binary>>), do: {rest, c}
+      defmacro twice(x, y), do: quote(do: unquote(x) + unquote(y))
+      defdelegate sum(a, b), to: Kernel, as: :+
+    end
+    """
+
+    test "no mutant of a head fails to compile" do
+      # FunctionCall removed `add(a, b)`, leaving `def nil when ...`, and
+      # treated `\\\\`, `<>` and `|` in parameters as calls.
+      mutators = Muex.Config.all_mutators() -- [Muex.Mutator.StatementDeletion]
+
+      assert invalid_mutants(@heads, mutators) == []
+    end
+
+    test "the head is never offered; parameters, defaults and guards are" do
+      mutations = Mutator.walk(ast!(@heads), Muex.Config.all_mutators(), %{file: "s.ex"})
+      originals = Enum.map(mutations, &Macro.to_string(&1.original_ast))
+
+      for head <- ["add(a, b)", "scale(a, b \\\\ 2)", "b \\\\ 2", "is_pos(x)", "sum(a, b)"] do
+        refute head in originals
+      end
+
+      assert 2 in Enum.map(mutations, & &1.original_ast)
+      assert "pre" in Enum.map(mutations, & &1.original_ast)
+      assert "Guard: replace guard with true" in Enum.map(mutations, & &1.description)
+      assert "is_number(a) and is_number(b)" in originals
     end
   end
 

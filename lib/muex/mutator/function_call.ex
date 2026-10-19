@@ -5,6 +5,10 @@ defmodule Muex.Mutator.FunctionCall do
   Applies mutations to function calls:
   - Remove function calls (replace with nil)
   - Swap function arguments (when there are 2+ args)
+
+  A pattern holds no calls, so nothing in one is mutated. Removing a pattern
+  unbinds its variables, and swapping `"pre" <> rest` makes a binary pattern
+  that does not compile.
   """
   @behaviour Muex.Mutator
 
@@ -23,6 +27,8 @@ defmodule Muex.Mutator.FunctionCall do
   def supported_languages, do: [Muex.Language.Elixir, Muex.Language.Erlang]
 
   @impl true
+  def mutate(_ast, %{pattern: true}), do: []
+
   def mutate(ast, context) do
     case ast do
       {func, meta, args} when is_atom(func) and is_list(args) and args != [] ->
