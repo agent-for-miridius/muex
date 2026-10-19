@@ -227,6 +227,10 @@ defmodule Muex.Mutator do
   and the right side of `in` in a guard, which must be a list or range when
   the guard compiles. A sigil's modifiers are not offered.
 
+  A module body runs when the module compiles. Outside its definitions the
+  walk sets `context[:module_body]` to the body's statements, and also sets
+  `context[:statement]` to `true` on each of those statements.
+
   Callers can prune additional framework DSL calls by passing a list of
   call names (atoms) in `context[:skip_calls]`. For example,
   `[:attr, :slot, :scope, :pipeline]` removes Phoenix component and router
@@ -265,7 +269,12 @@ defmodule Muex.Mutator do
     if skip?(node, skip_calls) do
       []
     else
-      context = context |> update_line(node) |> update_function(node) |> update_arrows(node)
+      context =
+        context
+        |> update_line(node)
+        |> update_function(node)
+        |> update_arrows(node)
+        |> update_statement(path)
 
       mutations =
         case bitstring_generator?(node) do
@@ -273,7 +282,12 @@ defmodule Muex.Mutator do
           false -> mutate_node(node, mutators, context, path)
         end
 
-      children_context = context |> Map.delete(:irreplaceable) |> enter_capture(node)
+      children_context =
+        context
+        |> Map.drop([:irreplaceable, :statement])
+        |> enter_capture(node)
+        |> enter_module(node, path)
+
       mutations ++ collect_children(node, mutators, children_context, skip_calls, path)
     end
   end
@@ -285,6 +299,38 @@ defmodule Muex.Mutator do
     do: Map.put(context, :capture, true)
 
   defp enter_capture(context, _node), do: context
+
+  # A module body runs when the module compiles, so a mutant that makes it
+  # raise does not compile. Its code is walked with `context[:module_body]`
+  # set to the body's statements, and each of those statements with
+  # `context[:statement]` set too. A definition clears both: its body runs
+  # when called.
+  defp enter_module(context, {:defmodule, _meta, [_name, [{:do, body}]]}, path) do
+    body_path = below(path, [2, 1, 0, 1])
+
+    {statements, paths} =
+      case body do
+        {:__block__, _block_meta, statements} ->
+          paths =
+            for {_statement, index} <- Enum.with_index(statements),
+                do: below(body_path, [2, index])
+
+          {statements, paths}
+
+        statement ->
+          {[statement], [body_path]}
+      end
+
+    Map.merge(context, %{module_body: statements, statement_paths: MapSet.new(paths)})
+  end
+
+  defp enter_module(context, _node, _path), do: context
+
+  defp update_statement(%{statement_paths: paths} = context, path) do
+    if MapSet.member?(paths, path), do: Map.put(context, :statement, true), else: context
+  end
+
+  defp update_statement(context, _path), do: context
 
   # `for <<byte <- bin>>`: the `<<>>` marks a bitstring generator and is not a
   # value, so only what is inside it is offered.
@@ -408,6 +454,8 @@ defmodule Muex.Mutator do
   # walked as usual.
   defp collect_children({kind, _meta, [head | rest]}, mutators, context, skip_calls, path)
        when kind in @definitions do
+    context = Map.drop(context, [:module_body, :statement_paths])
+
     collect_head(head, mutators, context, skip_calls, below(path, [2, 0])) ++
       (rest
        |> Enum.with_index(1)

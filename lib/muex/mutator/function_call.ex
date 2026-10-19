@@ -13,6 +13,9 @@ defmodule Muex.Mutator.FunctionCall do
   the stage), nor does a sigil with `nil` for its text, nor `x in nil` in a
   guard. The arguments of a
   sigil, `raise`, `reraise`, and `in` in a guard are not swapped.
+
+  In a module body, outside its definitions, no call is swapped and only a
+  statement of the body is removed: that code runs when the module compiles.
   """
   @behaviour Muex.Mutator
 
@@ -107,10 +110,20 @@ defmodule Muex.Mutator.FunctionCall do
     ]
   end
 
+  # A module body runs when the module compiles: a call whose value it uses
+  # (`defstruct @fields`, `for f <- @fields`) cannot become `nil`, and one
+  # with its arguments swapped mostly raises (`Enum.join(",", list)`). Only
+  # a statement of the body is removed there.
   defp removal(_description, %{irreplaceable: true}, _line), do: []
+
+  defp removal(_description, %{module_body: _} = context, _line)
+       when not is_map_key(context, :statement), do: []
+
   defp removal(description, context, line), do: [build_mutation(nil, description, context, line)]
 
   # Swap a call's first two arguments.
+  defp swap(_ast, _name, _swappable?, %{module_body: _}, _line), do: []
+
   defp swap({call, meta, [first, second | rest]}, name, true, context, line) do
     [
       build_mutation(

@@ -437,7 +437,7 @@ defmodule Muex.Mutator.WalkTest do
       refute "timeout(5000)" in originals
       assert "@timeout 5000" in originals
       assert 5_000 in Enum.map(mutations, & &1.original_ast)
-      assert "max(2, 3)" in originals
+      assert 3 in Enum.map(mutations, & &1.original_ast)
     end
   end
 
@@ -503,6 +503,43 @@ defmodule Muex.Mutator.WalkTest do
       mutations = source |> ast!() |> Mutator.walk([FunctionCall], %{file: "s.ex"})
 
       refute Enum.any?(mutations, &match?(%{original_ast: {:@, _, _}, ast: nil}, &1))
+    end
+  end
+
+  describe "module bodies" do
+    @module_body """
+    defmodule Muex.WalkTest.ModuleBody do
+      Module.register_attribute(__MODULE__, :acc, accumulate: true)
+      @acc max(1, 2)
+      @joined Enum.join(["a", "b"], ",")
+      @q div(10, 3)
+      defstruct Enum.concat([:a], [:b])
+
+      for f <- Enum.reverse([:x, :y]) do
+        def unquote(:"get_\#{f}")(), do: unquote(f)
+      end
+
+      def run(xs), do: {@acc, @joined, @q, Enum.join(xs, ","), div(7, 2)}
+    end
+    """
+
+    test "no FunctionCall mutant of a module body fails to compile" do
+      assert invalid_mutants(@module_body, [FunctionCall]) == []
+    end
+
+    test "a module body's statements are still removed, and calls in a definition still swapped and removed" do
+      mutations = @module_body |> ast!() |> Mutator.walk([FunctionCall], %{file: "s.ex"})
+
+      changed =
+        for %{ast: ast, original_ast: original} <- mutations,
+            do: {Macro.to_string(original), ast && Macro.to_string(ast)}
+
+      assert {"Module.register_attribute(__MODULE__, :acc, accumulate: true)", nil} in changed
+      assert {"Enum.join(xs, \",\")", "Enum.join(\",\", xs)"} in changed
+      assert {"div(7, 2)", "div(2, 7)"} in changed
+      assert {"div(7, 2)", nil} in changed
+      refute {"div(10, 3)", "div(3, 10)"} in changed
+      refute {"div(10, 3)", nil} in changed
     end
   end
 
