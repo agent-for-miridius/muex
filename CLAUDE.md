@@ -1,1 +1,3 @@
-Children's branches merge into the default branch without pull requests.
+- Landing changes
+  - Children's branches merge into the default branch without pull requests.
+  - Push each change to `origin` `main` as it lands.
