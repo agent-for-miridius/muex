@@ -255,6 +255,9 @@ results:
   that drops a placeholder of the code it replaces
 - The head of a definition (`def add(a, b)`) and the `\\` of a default; the
   parameters, default values and guard are still mutated
+- The name of a module attribute being set (`timeout` in `@timeout 5_000`); the
+  value is still mutated
+- The modifiers of a sigil (the `i` in `~r/ab+c/i`); the text is still mutated
 
 This pruning is always on and requires no configuration. Literals inside function
 bodies still receive an accurate source line, so survived and suspicious mutants
