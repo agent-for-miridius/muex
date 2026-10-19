@@ -268,6 +268,32 @@ defmodule Muex.Mutator.WalkTest do
       assert [4, 4] = for(%{original_ast: 1} = m <- mutations, do: m.location.line)
     end
 
+    test "no mutant inside a capture's body fails to compile" do
+      source = """
+      defmodule Muex.WalkTest.CaptureBodies do
+        def run(xs) do
+          {Enum.map(xs, &(&1 + 1)), Enum.reduce(xs, 0, &(&1 + &2)), Enum.map(xs, &max(&1, 2)),
+           Enum.map(xs, &{&1, :x}), Enum.reduce(xs, 0, &(&2 - &1)), Enum.reduce(xs, [], &[&1 | &2])}
+        end
+      end
+      """
+
+      assert invalid_mutants(source, Muex.Config.all_mutators()) == []
+    end
+
+    test "inside a capture, mutations that keep every placeholder are still offered" do
+      ast = ast!("defmodule Sample, do: def(run(xs), do: Enum.reduce(xs, 0, &(&1 + &2 * 3)))")
+
+      changed =
+        for %{ast: ast, original_ast: original} <- Mutator.walk(ast, [Arithmetic, Literal], %{}),
+            do: {Macro.to_string(original), Macro.to_string(ast)}
+
+      assert {"&1 + &2 * 3", "&1 - &2 * 3"} in changed
+      assert {"&2 * 3", "&2 / 3"} in changed
+      assert {"3", "4"} in changed
+      refute Enum.any?(changed, &match?({_, "0"}, &1))
+    end
+
     test "the `/` of division inside a capture is still mutated" do
       ast =
         ast!("""

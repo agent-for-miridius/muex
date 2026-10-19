@@ -103,12 +103,10 @@ defmodule Muex.Mutator.ArithmeticTest do
     test "division inside a capture is still mutated" do
       # `&(&1 / 2)` also has an integer right of the `/`, directly under `&`.
       # What makes it division is the left operand, `&1`, not a function name.
+      # "/ to 1 (identity)" would leave `&1` with no capture around it.
       mutations = walk("def c(xs), do: Enum.map(xs, &(&1 / 2))")
 
-      assert Enum.map(mutations, & &1.description) == [
-               "Arithmetic: / to *",
-               "Arithmetic: / to 1 (identity)"
-             ]
+      assert Enum.map(mutations, & &1.description) == ["Arithmetic: / to *"]
 
       assert Enum.all?(mutations, &match?({:/, _meta, [{:&, _, [1]}, 2]}, &1.original_ast))
     end
@@ -116,10 +114,7 @@ defmodule Muex.Mutator.ArithmeticTest do
     test "division by the argument inside a capture is still mutated" do
       # `&(x / &1)` has a variable left of the `/`, like `&fun/1`; what makes it
       # division is that the right is not an integer arity.
-      assert [
-               %{description: "Arithmetic: / to *"},
-               %{description: "Arithmetic: / to 1 (identity)"}
-             ] =
+      assert [%{description: "Arithmetic: / to *"}] =
                walk("def e(xs, x), do: Enum.map(xs, &(x / &1))")
     end
   end

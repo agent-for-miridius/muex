@@ -198,6 +198,9 @@ defmodule Muex.Mutator do
     * The `/` of a function capture (`&Mod.fun/arity`, `&fun/arity`),
       which names the arity; the function is traversed, and so is the
       arity of a remote capture only.
+    * The number of a capture placeholder (`&1`). Inside `&(...)`, a
+      mutation that drops a placeholder of the node it replaces is
+      discarded.
     * The head of a definition (`def`, `defp`, `defmacro`, `defmacrop`,
       `defguard`, `defguardp`, `defdelegate`): `name(params)` and the `\\`
       of a default are never offered. The parameters, default values and
@@ -259,10 +262,18 @@ defmodule Muex.Mutator do
           false -> mutate_node(node, mutators, context, path)
         end
 
-      children_context = Map.delete(context, :pipe_target)
+      children_context = context |> Map.delete(:pipe_target) |> enter_capture(node)
       mutations ++ collect_children(node, mutators, children_context, skip_calls, path)
     end
   end
+
+  # Inside `&(...)` a mutation must keep every `&N` of the node it replaces:
+  # one that drops `&1` (`&(&1 + &2)` to `&(nil + &2)`) or every placeholder
+  # (`&0`, `&nil`) does not compile. The capture itself may still be replaced.
+  defp enter_capture(context, {:&, _meta, [body]}) when not is_integer(body),
+    do: Map.put(context, :capture, true)
+
+  defp enter_capture(context, _node), do: context
 
   # `for <<byte <- bin>>`: the `<<>>` marks a bitstring generator and is not a
   # value, so only what is inside it is offered.
@@ -270,11 +281,33 @@ defmodule Muex.Mutator do
   defp bitstring_generator?(_node), do: false
 
   defp mutate_node(node, mutators, context, path) do
+    keeps_placeholders? = keeps_placeholders(node, context)
+
     Enum.flat_map(mutators, fn mutator ->
       node
       |> mutator.mutate(context)
+      |> Enum.filter(&keeps_placeholders?.(&1.ast))
       |> Enum.map(&annotate(&1, node, context, path))
     end)
+  end
+
+  # Whether a replacement for `node` keeps each of its capture placeholders;
+  # see `enter_capture/2`.
+  defp keeps_placeholders(node, %{capture: true}) do
+    needed = placeholders(node)
+    &MapSet.subset?(needed, placeholders(&1))
+  end
+
+  defp keeps_placeholders(_node, _context), do: fn _ast -> true end
+
+  defp placeholders(ast) do
+    {_ast, found} =
+      Macro.prewalk(ast, MapSet.new(), fn
+        {:&, _meta, [n]} = node, acc when is_integer(n) -> {node, MapSet.put(acc, n)}
+        node, acc -> {node, acc}
+      end)
+
+    found
   end
 
   # Record what a mutation needs at application time: the matched node itself,
@@ -352,6 +385,12 @@ defmodule Muex.Mutator do
           collect_arity(kind, arity, mutators, context, skip_calls, below(path, [2, 0, 2, 1]))
     end
   end
+
+  # Capture placeholder: `&1`. Its number is not a value; changing it leaves
+  # `&0`, or a capture that skips `&1`.
+  defp collect_children({:&, _meta, [n]}, _mutators, _context, _skip_calls, _path)
+       when is_integer(n),
+       do: []
 
   # Definition: `def name(params) when guard`. The head is not a call, so no
   # mutator is offered it; see `collect_head/5`. The body and options are
