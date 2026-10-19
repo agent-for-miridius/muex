@@ -58,6 +58,65 @@ defmodule Muex.TestRunner.PortTest do
     end
   end
 
+  # The timeout covers the tests only. Booting, compiling and starting the app
+  # have their own, longer bound: under load they took longer than a small
+  # project's tests, and healthy mutants timed out before their tests ran.
+  describe "timeouts" do
+    @describetag :tmp_dir
+
+    test "time spent before the suite starts is not counted", %{tmp_dir: tmp_dir} do
+      write_project!(tmp_dir, "Process.sleep(3_000)", "assert true")
+
+      assert {:ok, %{failures: 0, tests_run: 1, output: output}} =
+               PortRunner.run_tests([], timeout_ms: 1_000, cd: tmp_dir)
+
+      refute output =~ "[muex:"
+    end
+
+    test "a test that hangs times out after the test timeout", %{tmp_dir: tmp_dir} do
+      write_project!(tmp_dir, "", "Process.sleep(:infinity)")
+      started = System.monotonic_time(:millisecond)
+
+      assert {:error, :timeout} =
+               PortRunner.run_tests([],
+                 timeout_ms: 1_000,
+                 startup_timeout_ms: 60_000,
+                 cd: tmp_dir
+               )
+
+      assert System.monotonic_time(:millisecond) - started < 30_000
+    end
+
+    test "a hang before the suite starts times out after the startup timeout",
+         %{tmp_dir: tmp_dir} do
+      write_project!(tmp_dir, "Process.sleep(:infinity)", "assert true")
+
+      assert {:error, :timeout} =
+               PortRunner.run_tests([], timeout_ms: 1_000, startup_timeout_ms: 3_000, cd: tmp_dir)
+    end
+
+    defp write_project!(dir, before_start, test_body) do
+      name = "MuexTimeout#{System.unique_integer([:positive])}"
+
+      File.write!(Path.join(dir, "mix.exs"), """
+      defmodule #{name}.MixProject do
+        use Mix.Project
+        def project, do: [app: :#{Macro.underscore(name)}, version: "0.1.0"]
+      end
+      """)
+
+      File.mkdir_p!(Path.join(dir, "test"))
+      File.write!(Path.join(dir, "test/test_helper.exs"), "#{before_start}\nExUnit.start()\n")
+
+      File.write!(Path.join(dir, "test/a_test.exs"), """
+      defmodule #{name}Test do
+        use ExUnit.Case
+        test "a", do: #{test_body}
+      end
+      """)
+    end
+  end
+
   describe "compile error classification" do
     test "syntax error in test file is classified as compile_error" do
       # Create a test file with invalid Elixir syntax — this will always

@@ -102,10 +102,12 @@ defmodule Muex.Sandbox do
         Map.put(sandbox, :base, base_dir)
       end
 
-    # Compile every umbrella sandbox once, before the first mutant, so that
-    # compile is not charged to the per-mutant timeout.
+    # Compile every sandbox once, before the first mutant, so that compile is
+    # not charged to the per-mutant timeout.
     if umbrella do
       warm_up!(sandboxes, base_dir)
+    else
+      warm_up_plain(sandboxes)
     end
 
     sandboxes
@@ -384,6 +386,42 @@ defmodule Muex.Sandbox do
         """
       end
     end)
+  end
+
+  # A plain sandbox sits at a new path too, so its first `mix test` recompiles
+  # the whole app, even from a copy of a built one. Give each sandbox its own
+  # copy of the app's build and compile it here, all at once, as the first
+  # mutants would have. The flags match the mutants' `mix test`, so their
+  # compile finds nothing else to do.
+  #
+  # A failed compile is not raised: the first mutant meets the same error, and
+  # the worker pool's broken-run check names the files it is in.
+  defp warm_up_plain(sandboxes) do
+    started = System.monotonic_time(:millisecond)
+
+    sandboxes
+    |> Task.async_stream(&compile_plain/1,
+      max_concurrency: length(sandboxes),
+      timeout: :infinity
+    )
+    |> Stream.run()
+
+    elapsed = System.monotonic_time(:millisecond) - started
+    IO.puts(:stderr, "muex: warmed #{length(sandboxes)} sandbox(es) in #{elapsed} ms")
+  end
+
+  # With no app name there is no private build to compile into, only a link to
+  # the real one, so that sandbox is left as it was.
+  defp compile_plain(sandbox) do
+    if app = app_name_of_project(sandbox.project_root, sandbox.build_env) do
+      ensure_build_copy(sandbox, app)
+
+      System.cmd("mix", ["compile", "--no-deps-check", "--no-archives-check"],
+        cd: sandbox.root,
+        env: Muex.GitEnv.cmd_env([{"MIX_ENV", sandbox.build_env}]),
+        stderr_to_stdout: true
+      )
+    end
   end
 
   @doc """

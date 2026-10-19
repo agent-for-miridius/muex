@@ -461,6 +461,34 @@ defmodule Muex.SandboxTest do
                )
     end
 
+    # A project compiled at another path is compiled again in full, so each
+    # sandbox's first mutant used to compile the whole app inside its timeout.
+    test "the pool compiles each sandbox, so a mutant compiles only its own file",
+         %{project_root: project_root} do
+      File.write!(Path.join(project_root, "lib/extra.ex"), "defmodule Extra, do: nil\n")
+
+      {[sandbox], stderr} =
+        with_io(:stderr, fn ->
+          Sandbox.create_pool(1, project_root: project_root, test_paths: ["test"])
+        end)
+
+      on_exit(fn -> Sandbox.cleanup([sandbox]) end)
+      assert stderr =~ "muex: warmed 1 sandbox(es)"
+      # The warm-up compiled into the sandbox's own build, not the project's.
+      refute File.exists?(Path.join(project_root, "_build/test/lib/proj"))
+
+      source = File.read!(Path.join(project_root, "lib/proj.ex"))
+      assert {:ok, _} = Sandbox.apply_mutation(sandbox, "lib/proj.ex", source, Proj)
+
+      assert {:ok, %{failures: 0, output: output}} =
+               Muex.TestRunner.Port.run_tests(["test/proj_test.exs"],
+                 timeout_ms: 60_000,
+                 cd: sandbox.root
+               )
+
+      assert output =~ "Compiling 1 file (.ex)"
+    end
+
     test "a dependency that does not build stops the run with the compiler's output",
          %{repo: repo, project_root: project_root} do
       File.write!(Path.join(repo, "leaf/lib/broken.ex"), "defmodule Broken do\n")

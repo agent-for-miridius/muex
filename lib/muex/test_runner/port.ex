@@ -24,7 +24,13 @@ defmodule Muex.TestRunner.Port do
 
     - `test_files` - List of test file paths to execute
     - `opts` - Options:
-      - `:timeout_ms` - Test timeout in milliseconds (default: 5000)
+      - `:timeout_ms` - How long ExUnit may run the tests, in milliseconds,
+        counted from the moment the suite starts (default: 5000). Starting
+        the VM, compiling and starting the app are not counted.
+      - `:startup_timeout_ms` - How long the run may take before the suite
+        starts, and after it finishes (default: the larger of 60 s and six
+        times `:timeout_ms`). Bounds a mutant that hangs while compiling or
+        starting the app.
       - `:mix_env` - Mix environment (default: "test")
       - `:cd` - Working directory for the port process (default: current dir).
         When running inside a sandbox, this should be the sandbox root.
@@ -39,13 +45,19 @@ defmodule Muex.TestRunner.Port do
   @spec run_tests([Path.t()], keyword()) :: {:ok, test_result()} | {:error, term()}
   def run_tests(test_files, opts \\ []) do
     timeout_ms = Keyword.get(opts, :timeout_ms, 5000)
+
+    timeouts = %{
+      tests: timeout_ms,
+      startup: Keyword.get(opts, :startup_timeout_ms, max(60_000, 6 * timeout_ms))
+    }
+
     mix_env = Keyword.get(opts, :mix_env, "test")
     cd = Keyword.get(opts, :cd)
     no_compile = Keyword.get(opts, :no_compile, false)
     exclude_flags = if Keyword.get(opts, :exclude_all, false), do: ["--exclude", "test"], else: []
     start_time = System.monotonic_time(:millisecond)
 
-    case spawn_test_port(test_files, mix_env, timeout_ms, cd, no_compile, exclude_flags) do
+    case spawn_test_port(test_files, mix_env, timeouts, cd, no_compile, exclude_flags) do
       {:ok, output, exit_code} ->
         duration_ms = System.monotonic_time(:millisecond) - start_time
 
@@ -72,7 +84,44 @@ defmodule Muex.TestRunner.Port do
     end
   end
 
-  defp spawn_test_port(test_files, mix_env, timeout_ms, cd, no_compile, exclude_flags) do
+  # The suite's start and end, as the child announces them. A formatter muex
+  # adds prints each, glued to whatever ExUnit printed last (dots end no line),
+  # so they are found anywhere in the output and cut out of it afterwards. They
+  # are the same length; see next_deadline/4.
+  @suite_started "[muex:suite:begin]"
+  @suite_finished "[muex:suite:ended]"
+
+  # `mix test` run through a script that first defines that formatter and then
+  # does what the `mix` script does, so the child needs nothing of muex on its
+  # code path: muex may be an escript, or absent from the project's deps.
+  @runner_script """
+  defmodule MuexSuiteSignal do
+    @moduledoc false
+    use GenServer
+    def init(_opts), do: {:ok, nil}
+    def handle_cast({:suite_started, _opts}, state), do: signal(#{inspect(@suite_started)}, state)
+    def handle_cast({:suite_finished, _times}, state), do: signal(#{inspect(@suite_finished)}, state)
+    def handle_cast(_event, state), do: {:noreply, state}
+    defp signal(text, state), do: (IO.write(text); {:noreply, state})
+  end
+
+  Mix.CLI.main()
+  """
+
+  defp spawn_test_port(test_files, mix_env, timeouts, cd, no_compile, exclude_flags) do
+    script =
+      Path.join(System.tmp_dir!(), "muex_mix_test_#{System.unique_integer([:positive])}.exs")
+
+    File.write!(script, @runner_script)
+
+    try do
+      open_test_port(script, test_files, mix_env, timeouts, cd, no_compile, exclude_flags)
+    after
+      File.rm(script)
+    end
+  end
+
+  defp open_test_port(script, test_files, mix_env, timeouts, cd, no_compile, exclude_flags) do
     # When the caller pre-compiled the mutated module and wrote the .beam
     # directly, we pass --no-compile to skip Mix's compilation phase entirely.
     # We also always pass --no-deps-check and --no-archives-check since deps
@@ -84,10 +133,19 @@ defmodule Muex.TestRunner.Port do
         ["--no-deps-check", "--no-archives-check"]
       end
 
-    mix_path = System.find_executable("mix")
+    elixir_path = System.find_executable("elixir")
     # --max-failures 1: a mutant is killed by any failing test, so stop at the
     # first one instead of running the whole (selected) suite.
-    args = ["test", "--max-failures", "1"] ++ compile_flags ++ exclude_flags ++ test_files
+    #
+    # Naming a formatter replaces the configured ones, so the CLI formatter,
+    # whose summary is read here, is named too. A test helper that sets its own
+    # formatters drops the signal, and the whole run is then held to the
+    # startup timeout.
+    formatter_flags = ["--formatter", "ExUnit.CLIFormatter", "--formatter", "MuexSuiteSignal"]
+
+    args =
+      [script, "test", "--max-failures", "1"] ++
+        formatter_flags ++ compile_flags ++ exclude_flags ++ test_files
 
     current_env =
       System.get_env()
@@ -108,8 +166,8 @@ defmodule Muex.TestRunner.Port do
       |> maybe_add_cd(cd)
 
     try do
-      port = Port.open({:spawn_executable, mix_path}, port_opts)
-      collect_output(port, "", timeout_ms)
+      port = Port.open({:spawn_executable, elixir_path}, port_opts)
+      collect_output(port, "", timeouts, deadline(timeouts.startup))
     rescue
       e -> {:error, e}
     catch
@@ -120,26 +178,52 @@ defmodule Muex.TestRunner.Port do
   defp maybe_add_cd(port_opts, nil), do: port_opts
   defp maybe_add_cd(port_opts, cd), do: [{:cd, String.to_charlist(cd)} | port_opts]
 
-  defp collect_output(port, acc, timeout_ms) do
+  # The clock is `timeouts.tests` from the suite's start, and
+  # `timeouts.startup` before it and after the suite finishes. Under load,
+  # booting the VM and compiling take many times longer than the tests of a
+  # small project, and a healthy mutant timed out before its tests began.
+  defp collect_output(port, acc, timeouts, deadline) do
     receive do
       {^port, {:data, data}} when is_binary(data) ->
-        collect_output(port, acc <> data, timeout_ms)
+        collect_output(port, acc <> data, timeouts, next_deadline(acc, data, timeouts, deadline))
 
       {^port, {:exit_status, exit_code}} ->
         safe_close(port)
         # Not per chunk: a chunk boundary can split a valid character.
-        {:ok, String.replace_invalid(acc), exit_code}
+        output = acc |> String.replace([@suite_started, @suite_finished], "")
+        {:ok, String.replace_invalid(output), exit_code}
 
       _msg ->
-        collect_output(port, acc, timeout_ms)
+        collect_output(port, acc, timeouts, deadline)
     after
-      timeout_ms ->
+      max(deadline - System.monotonic_time(:millisecond), 0) ->
         kill_os_process(port)
         safe_close(port)
         {:error, :timeout}
     end
   rescue
     e -> {:error, e}
+  end
+
+  defp deadline(ms), do: System.monotonic_time(:millisecond) + ms
+
+  # The last signal in `data`, read with enough of `acc` before it to see one
+  # split across chunks, but never a whole one seen before.
+  defp next_deadline(acc, data, timeouts, deadline) do
+    overlap = min(byte_size(acc), byte_size(@suite_started) - 1)
+    window = binary_part(acc, byte_size(acc), -overlap) <> data
+
+    case :binary.matches(window, [@suite_started, @suite_finished]) do
+      [] ->
+        deadline
+
+      matches ->
+        {at, length} = List.last(matches)
+
+        if binary_part(window, at, length) == @suite_started,
+          do: deadline(timeouts.tests),
+          else: deadline(timeouts.startup)
+    end
   end
 
   # Kill the OS process and its entire process tree. `mix test` spawns a

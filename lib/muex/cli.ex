@@ -95,7 +95,7 @@ defmodule Muex.CLI do
         --mutators <list>           Comma-separated mutators (default: all)
         --mutator-paths <dirs>      Comma-separated dirs with custom mutators
         --concurrency <n>           Parallel mutations (default: CPU cores)
-        --timeout <ms>              Test timeout in milliseconds (default: 10000)
+        --timeout <ms>              Time the tests may run, from ExUnit's start (default: 10000)
         --fail-at <score>           Minimum mutation score to pass (default: 80)
         --format <type>             Output format: terminal, json, html (default: terminal)
         --output <file>             Write the json or html report to a file, print a summary line

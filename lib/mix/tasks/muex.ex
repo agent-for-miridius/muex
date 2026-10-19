@@ -16,7 +16,9 @@ defmodule Mix.Tasks.Muex do
     * `--language` - Language adapter to use (default: "elixir")
     * `--mutators` - Comma-separated list of mutators (default: all)
     * `--concurrency` - Number of parallel mutations (default: number of schedulers)
-    * `--timeout` - Test timeout in milliseconds (default: 10000)
+    * `--timeout` - How long a mutant's tests may run, in milliseconds,
+      counted from ExUnit's start, so booting and compiling are not counted
+      (default: 10000)
     * `--fail-at` - Minimum mutation score to pass (default: 80)
     * `--format` - Output format: terminal, json, html (default: terminal)
     * `--output` - Write the json or html report to this file and print a one-line summary

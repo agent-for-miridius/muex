@@ -46,7 +46,9 @@ defmodule Muex.Config do
       modules implementing `Muex.Mutator` behaviour. Files are compiled and
       loaded at runtime.
     * `--concurrency` - Number of parallel workers (default: number of schedulers)
-    * `--timeout` - Test timeout in milliseconds (default: 10000)
+    * `--timeout` - How long a mutant's tests may run, in milliseconds,
+      counted from ExUnit's start, so booting and compiling are not counted
+      (default: 10000)
     * `--fail-at` - Minimum mutation score percentage to pass (default: 80)
     * `--format` - Output format: `terminal`, `json`, `html` (default: `terminal`)
     * `--output` - Write the `json` or `html` report to this file and print a
