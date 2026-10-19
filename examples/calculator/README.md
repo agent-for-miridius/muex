@@ -38,22 +38,6 @@ mix muex --max-workers 2 --timeout 10000
 
 ## Results
 
-Mutation testing with muex is fully functional and produces excellent results:
-
-```
-Mutation Testing Results
-==================================================
-Total mutants: 249
-Killed: 216 (caught by tests)
-Survived: 31 (not caught by tests)
-Invalid: 0 (compilation errors)
-Timeout: 2
-==================================================
-Mutation Score: 86.75%
-```
-
-The comprehensive test suite catches 86.75% of mutations, demonstrating strong test quality. The 31 survived mutations indicate areas where additional test coverage could be beneficial.
-
 ### Fixes Applied to Muex
 
 While setting up this example, several critical fixes were applied to the muex library:
