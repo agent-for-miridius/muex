@@ -35,6 +35,16 @@ defmodule Muex.Mutator.FunctionCallTest do
       assert Enum.any?(mutations, &(&1.ast == {:foo, [line: 3], [:b, :a, :c]}))
     end
 
+    test "removes raise and reraise but never swaps their arguments" do
+      for source <- [
+            ~S'raise(ArgumentError, "neg")',
+            ~S'raise(ArgumentError, opts)',
+            ~S'reraise(ArgumentError, [message: "m"], st)'
+          ] do
+        assert [%{ast: nil}] = source |> Code.string_to_quoted!() |> FunctionCall.mutate(%{})
+      end
+    end
+
     test "does not mutate special forms like def" do
       ast = {:def, [line: 1], [:foo, :bar]}
       context = %{file: "test.ex"}

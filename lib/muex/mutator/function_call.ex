@@ -10,8 +10,8 @@ defmodule Muex.Mutator.FunctionCall do
   unbinds its variables, and swapping `"pre" <> rest` makes a binary pattern
   that does not compile. A node the walk marks `:irreplaceable` is not
   removed either: `value |> nil` does not compile (`Muex.Mutator.Pipe` drops
-  the stage), nor does a sigil with `nil` for its text. A sigil's arguments
-  are not swapped.
+  the stage), nor does a sigil with `nil` for its text. The arguments of a
+  sigil, `raise`, `reraise`, and `in` in a guard are not swapped.
   """
   @behaviour Muex.Mutator
 
@@ -146,8 +146,12 @@ defmodule Muex.Mutator.FunctionCall do
 
   # Kernel's sigils are macros that take the text first and the modifiers
   # second; swapped, they do not compile. Nor does `[1, 2] in x` in a guard,
-  # which needs a list or range on the right when it compiles.
+  # which needs a list or range on the right when it compiles. `raise(Mod,
+  # attrs)` expands to `Mod.exception(attrs)`, so swapped it does not compile
+  # when `attrs` is a literal string, number or list, and otherwise only
+  # raises something else; `reraise` is the same.
   defp swappable?(:in, %{guard: true}), do: false
+  defp swappable?(func, _context) when func in [:raise, :reraise], do: false
   defp swappable?(func, _context), do: not Muex.Mutator.sigil?(func)
 
   defp swap_first_two([first, second | rest]) do
