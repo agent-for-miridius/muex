@@ -9,11 +9,11 @@ defmodule Muex.Sandbox do
 
   Supports both standard Mix projects and umbrella projects.
 
-  A plain project's sandbox is the worker directory itself, unless the
-  project's `mix.exs` has a relative `path:` dependency that climbs above it:
-  then the sandbox sits as many directories down, under the project's own
-  directory names, beside links to everything around them, so the path
-  resolves as it does in the real project.
+  The sandbox sits under the names of the project's directory and of as many
+  parents as the highest relative `path:` dependency in its `mix.exs` climbs
+  (an umbrella's, at least one), beside links to everything around them, so
+  those paths resolve as in the real project. With no parent to mirror, a
+  plain project's sandbox is the worker directory itself.
 
   ## Structure (umbrella)
 
@@ -30,9 +30,10 @@ defmodule Muex.Sandbox do
 
   defmodule Error do
     @moduledoc """
-    Raised when a run cannot give a trustworthy verdict: a sandbox does not
-    compile, the selected tests fail with no mutation applied, a target file
-    is not private to the sandbox, or a mutant has no test to judge it.
+    Raised when a run cannot give a trustworthy verdict: the dependencies do
+    not build, a sandbox does not compile, the selected tests fail with no
+    mutation applied, a target file is not private to the sandbox, or a
+    mutant has no test to judge it.
     `mix muex` reports the reason and scores nothing.
     """
     defexception [:message]
