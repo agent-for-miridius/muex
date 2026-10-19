@@ -249,8 +249,10 @@ results:
   `@type`, `@spec`, `@behaviour`, `@impl`, and similar
 - Keyword/option keys (only the value of a `key: value` pair is mutated)
 - The `/` of a function capture (`&Mod.fun/arity`, `&fun/arity`), which names
-  the arity rather than dividing; division inside a capture, `&(&1 / 2)`, is
-  still mutated
+  the arity rather than dividing, and the arity of a local, imported or operator
+  capture; division inside a capture, `&(&1 / 2)`, is still mutated
+- The number of a capture placeholder (`&1`), and any mutation inside `&(...)`
+  that drops a placeholder of the code it replaces
 - The head of a definition (`def add(a, b)`) and the `\\` of a default; the
   parameters, default values and guard are still mutated
 
