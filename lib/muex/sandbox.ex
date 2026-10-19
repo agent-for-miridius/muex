@@ -9,6 +9,12 @@ defmodule Muex.Sandbox do
 
   Supports both standard Mix projects and umbrella projects.
 
+  A plain project's sandbox is the worker directory itself, unless the
+  project's `mix.exs` has a relative `path:` dependency that climbs above it:
+  then the sandbox sits as many directories down, under the project's own
+  directory names, beside links to everything around them, so the path
+  resolves as it does in the real project.
+
   ## Structure (umbrella)
 
       worker_N/
@@ -75,31 +81,55 @@ defmodule Muex.Sandbox do
   end
 
   defp build_pool!(count, base_dir, project_root, build_env, test_paths, mirror) do
+    umbrella = umbrella?(project_root)
+
+    # A plain sandbox links the project's real build, and every mutant's
+    # `mix test` passes --no-deps-check, so nothing ever builds the
+    # dependencies for this env there. Build them in the project first.
+    unless umbrella, do: build_deps!(project_root, build_env)
+
+    levels = ancestor_levels(project_root, umbrella)
+
     sandboxes =
       for i <- 1..count do
         worker_dir = Path.join(base_dir, "worker_#{i}")
-
-        if umbrella?(project_root) do
-          # The umbrella lands under its own directory name, beside links to
-          # everything next to it. See link_project_siblings/2.
-          root = Path.join(worker_dir, Path.basename(project_root))
-          sandbox = create_sandbox(root, project_root, build_env, test_paths, mirror)
-          link_project_siblings(worker_dir, project_root)
-          Map.put(sandbox, :base, base_dir)
-        else
-          worker_dir
-          |> create_sandbox(project_root, build_env, test_paths, mirror)
-          |> Map.put(:base, base_dir)
-        end
+        # The project lands under the names of its last `levels` directories,
+        # beside links to everything around them. See link_ancestors/3.
+        root = Path.join([worker_dir | project_root |> Path.split() |> Enum.take(-levels)])
+        sandbox = create_sandbox(root, project_root, build_env, test_paths, mirror)
+        link_ancestors(worker_dir, project_root, levels)
+        Map.put(sandbox, :base, base_dir)
       end
 
     # Compile every umbrella sandbox once, before the first mutant, so that
     # compile is not charged to the per-mutant timeout.
-    if umbrella?(project_root) do
+    if umbrella do
       warm_up!(sandboxes, base_dir)
     end
 
     sandboxes
+  end
+
+  # Builds, in the real project, whichever dependencies `mix test` would build
+  # for `build_env`, before the sandboxes link that build. Dependencies that do
+  # not build leave no mutant to judge. The project itself is left to each
+  # sandbox, so an error in its own code still stops the run with the files the
+  # error names (see the worker pool's broken-run check).
+  defp build_deps!(project_root, build_env) do
+    {output, status} =
+      System.cmd("mix", ["deps.loadpaths"],
+        cd: project_root,
+        env: Muex.GitEnv.cmd_env([{"MIX_ENV", build_env}]),
+        stderr_to_stdout: true
+      )
+
+    if status != 0 do
+      raise Error, """
+      muex: `MIX_ENV=#{build_env} mix deps.loadpaths` failed in #{project_root} \
+      (exit #{status}): the dependencies do not build, so no mutant can run.
+      #{output}
+      """
+    end
   end
 
   @doc """
@@ -151,22 +181,70 @@ defmodule Muex.Sandbox do
       end)
   end
 
+  # How many directories above the project the sandbox mirrors.
+  #
   # Tests may read files beside the Mix project, not only inside it: an
   # umbrella kept in a subdirectory of a repository often has tests that read
   # `../some_dir/file`, or climb to the repository root and come back down
   # through the umbrella's own directory name. In a bare sandbox those paths
   # are missing, the test fails on every run, and that failure "kills" every
-  # mutant it judges. So the sandbox's parent mirrors the project's parent:
-  # everything there is linked except `.git`, so nothing run in a sandbox can
-  # reach the real git index.
-  defp link_project_siblings(worker_dir, project_root) do
-    parent = Path.dirname(project_root)
-    own = Path.basename(project_root)
+  # mutant it judges. So an umbrella always mirrors its parent.
+  #
+  # A dependency given as a relative `path:` (`{:muex, path: "../.."}`) is read
+  # from wherever that path lands. From a sandbox in the temp dir it lands
+  # outside the project, Mix cannot read the dependency's `mix.exs`, and the
+  # dependency's own dependencies are never loaded. So the sandbox mirrors as
+  # many levels as the highest such path climbs.
+  defp ancestor_levels(project_root, umbrella) do
+    climb = project_root |> relative_path_deps() |> Enum.map(&climb(&1, project_root))
+    Enum.max([if(umbrella, do: 1, else: 0) | climb])
+  end
 
-    parent
-    |> File.ls!()
-    |> Enum.reject(&(&1 in [own, ".git"]))
-    |> Enum.each(&safe_symlink(Path.join(parent, &1), Path.join(worker_dir, &1)))
+  # Every `path: "<literal>"` option in the project's `mix.exs`. A path built at
+  # runtime is not read; one built from `__DIR__` is absolute and needs nothing.
+  defp relative_path_deps(project_root) do
+    with {:ok, source} <- File.read(Path.join(project_root, "mix.exs")),
+         {:ok, ast} <- Code.string_to_quoted(source) do
+      {_ast, paths} =
+        Macro.prewalk(ast, [], fn
+          {:path, path} = node, acc when is_binary(path) -> {node, [path | acc]}
+          node, acc -> {node, acc}
+        end)
+
+      Enum.filter(paths, &(Path.type(&1) == :relative))
+    else
+      _ -> []
+    end
+  end
+
+  # How many directories above `project_root` the relative `path` reaches.
+  defp climb(path, project_root) do
+    own = Path.split(project_root)
+    target = path |> Path.expand(project_root) |> Path.split()
+    shared = own |> Enum.zip(target) |> Enum.take_while(fn {a, b} -> a == b end) |> length()
+    length(own) - shared
+  end
+
+  # The sandbox's ancestors, up to `levels` of them, mirror the project's: each
+  # holds a link to every entry of the real directory except the one on the way
+  # down to the project, and `.git`, so nothing run in a sandbox can reach the
+  # real git index.
+  defp link_ancestors(worker_dir, project_root, levels) do
+    # The names on the way down from the highest mirrored ancestor.
+    names = project_root |> Path.split() |> Enum.take(-levels)
+
+    for level <- 1..levels//1 do
+      ancestor = Path.join([project_root | List.duplicate("..", level)]) |> Path.expand()
+      {above, [own | _]} = Enum.split(names, levels - level)
+      dir = Path.join([worker_dir | above])
+
+      ancestor
+      |> File.ls!()
+      |> Enum.reject(&(&1 in [own, ".git"]))
+      |> Enum.each(&safe_symlink(Path.join(ancestor, &1), Path.join(dir, &1)))
+    end
+
+    :ok
   end
 
   @doc """

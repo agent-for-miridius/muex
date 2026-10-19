@@ -403,6 +403,77 @@ defmodule Muex.SandboxTest do
     end
   end
 
+  describe "plain project with a path dependency above it" do
+    @describetag :tmp_dir
+
+    # examples/calculator in this repo depends on {:muex, path: "../.."}. From a
+    # sandbox in the temp dir that path left the project, Mix could not read the
+    # dependency's mix.exs, and the dependency's own dependency never loaded.
+    # Nothing had built the test env either, so the first failure was the
+    # dependency's own .app file.
+    setup %{tmp_dir: tmp_dir} do
+      repo = Path.join(tmp_dir, "repo")
+
+      files = %{
+        "mix.exs" => plain_mix_exs(:dep, "Dep", [{:leaf, path: "leaf"}]),
+        "lib/dep.ex" => "defmodule Dep do\n  def two, do: Leaf.one() + 1\nend\n",
+        "leaf/mix.exs" => plain_mix_exs(:leaf, "Leaf", []),
+        "leaf/lib/leaf.ex" => "defmodule Leaf do\n  def one, do: 1\nend\n",
+        ".git/HEAD" => "ref: refs/heads/main\n",
+        "examples/other.txt" => "beside the project",
+        "examples/proj/mix.exs" => plain_mix_exs(:proj, "Proj", [{:dep, path: "../.."}]),
+        "examples/proj/lib/proj.ex" => "defmodule Proj do\n  def three, do: Dep.two() + 1\nend\n",
+        "examples/proj/test/test_helper.exs" => "ExUnit.start()\n",
+        "examples/proj/test/proj_test.exs" => """
+        defmodule ProjTest do
+          use ExUnit.Case
+          test "three", do: assert(Proj.three() == 3)
+        end
+        """
+      }
+
+      for {path, content} <- files do
+        full = Path.join(repo, path)
+        File.mkdir_p!(Path.dirname(full))
+        File.write!(full, content)
+      end
+
+      %{repo: repo, project_root: Path.join(repo, "examples/proj")}
+    end
+
+    test "the sandbox mirrors the two levels the path climbs, and its tests run",
+         %{repo: repo, project_root: project_root} do
+      [sandbox] = Sandbox.create_pool(1, project_root: project_root, test_paths: ["test"])
+      on_exit(fn -> Sandbox.cleanup([sandbox]) end)
+
+      assert sandbox.root |> Path.split() |> Enum.take(-2) == ["examples", "proj"]
+
+      assert File.read_link(Path.join(sandbox.root, "../../mix.exs")) ==
+               {:ok, Path.join(repo, "mix.exs")}
+
+      assert File.exists?(Path.join(sandbox.root, "../other.txt"))
+      refute File.exists?(Path.join(sandbox.root, "../../.git"))
+
+      assert {:ok, %{failures: 0, tests_run: 1}} =
+               Muex.TestRunner.Port.run_tests(["test/proj_test.exs"],
+                 timeout_ms: 60_000,
+                 cd: sandbox.root
+               )
+    end
+
+    test "a dependency that does not build stops the run with the compiler's output",
+         %{repo: repo, project_root: project_root} do
+      File.write!(Path.join(repo, "leaf/lib/broken.ex"), "defmodule Broken do\n")
+
+      error =
+        assert_raise Sandbox.Error, ~r/MIX_ENV=test mix deps.loadpaths` failed/, fn ->
+          Sandbox.create_pool(1, project_root: project_root, test_paths: ["test"])
+        end
+
+      assert error.message =~ "lib/broken.ex"
+    end
+  end
+
   describe "mirrored dirs" do
     @describetag :tmp_dir
 
@@ -474,6 +545,15 @@ defmodule Muex.SandboxTest do
 
     assert stderr =~ "muex: warmed worker_1/umbrella"
     sandboxes
+  end
+
+  defp plain_mix_exs(app, name, deps) do
+    """
+    defmodule #{name}.MixProject do
+      use Mix.Project
+      def project, do: [app: #{inspect(app)}, version: "0.1.0", deps: #{inspect(deps)}]
+    end
+    """
   end
 
   defp app_mix_exs(app, name, deps) do
