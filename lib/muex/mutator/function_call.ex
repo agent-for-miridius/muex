@@ -40,50 +40,15 @@ defmodule Muex.Mutator.FunctionCall do
         if special_form?(func) do
           []
         else
-          mutations = removal("remove #{func}() call", context, line)
-
-          mutations =
-            if length(args) >= 2 and swappable?(func, context) do
-              swapped_args = swap_first_two(args)
-
-              [
-                build_mutation(
-                  {func, meta, swapped_args},
-                  "swap arguments in #{func}()",
-                  context,
-                  line
-                )
-                | mutations
-              ]
-            else
-              mutations
-            end
-
-          Enum.reverse(mutations)
+          removal("remove #{func}() call", context, line) ++
+            swap(ast, "#{func}", swappable?(func, context), context, line)
         end
 
-      {{:., dot_meta, [module, func]}, meta, args} when is_list(args) and args != [] ->
+      {{:., _dot_meta, [module, func]}, meta, args} when is_list(args) and args != [] ->
         line = Keyword.get(meta, :line, 0)
-        mutations = removal("remove #{inspect(module)}.#{func}() call", context, line)
 
-        mutations =
-          if length(args) >= 2 do
-            swapped_args = swap_first_two(args)
-
-            [
-              build_mutation(
-                {{:., dot_meta, [module, func]}, meta, swapped_args},
-                "swap arguments in #{inspect(module)}.#{func}()",
-                context,
-                line
-              )
-              | mutations
-            ]
-          else
-            mutations
-          end
-
-        Enum.reverse(mutations)
+        removal("remove #{inspect(module)}.#{func}() call", context, line) ++
+          swap(ast, "#{inspect(module)}.#{func}", true, context, line)
 
       _ ->
         []
@@ -144,6 +109,20 @@ defmodule Muex.Mutator.FunctionCall do
   defp removal(_description, %{irreplaceable: true}, _line), do: []
   defp removal(description, context, line), do: [build_mutation(nil, description, context, line)]
 
+  # Swap a call's first two arguments.
+  defp swap({call, meta, [first, second | rest]}, name, true, context, line) do
+    [
+      build_mutation(
+        {call, meta, [second, first | rest]},
+        "swap arguments in #{name}()",
+        context,
+        line
+      )
+    ]
+  end
+
+  defp swap(_ast, _name, _swappable?, _context, _line), do: []
+
   # Kernel's sigils are macros that take the text first and the modifiers
   # second; swapped, they do not compile. Nor does `[1, 2] in x` in a guard,
   # which needs a list or range on the right when it compiles. `raise(Mod,
@@ -153,14 +132,6 @@ defmodule Muex.Mutator.FunctionCall do
   defp swappable?(:in, %{guard: true}), do: false
   defp swappable?(func, _context) when func in [:raise, :reraise], do: false
   defp swappable?(func, _context), do: not Muex.Mutator.sigil?(func)
-
-  defp swap_first_two([first, second | rest]) do
-    [second, first | rest]
-  end
-
-  defp swap_first_two(args) do
-    args
-  end
 
   defp build_mutation(mutated_ast, description, context, line) do
     %{
