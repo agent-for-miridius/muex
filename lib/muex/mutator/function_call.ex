@@ -114,16 +114,15 @@ defmodule Muex.Mutator.FunctionCall do
     ]
   end
 
-  # A module body runs when the module compiles: a call whose value it uses
-  # (`defstruct @fields`, `for f <- @fields`) cannot become `nil`, and one
-  # with its arguments swapped mostly raises (`Enum.join(",", list)`). Only
-  # a statement of the body is removed there, and not an attribute definition
-  # the module reads at compile time (`x in @limits` in a guard).
   defp removal(_ast, _description, %{irreplaceable: true}, _line), do: []
 
+  # A module body runs when the module compiles, so a call whose value it uses
+  # cannot become `nil` (`defstruct nil`, `for f <- nil`).
   defp removal(_ast, _description, %{module_body: _} = context, _line)
        when not is_map_key(context, :statement), do: []
 
+  # Nor can a statement defining what the module reads at compile time
+  # (`@limits` in `x in @limits` in a guard).
   defp removal(ast, description, %{module_body: statements} = context, line) do
     if References.still_referenced?(ast, List.delete(statements, ast)),
       do: [],
@@ -134,6 +133,8 @@ defmodule Muex.Mutator.FunctionCall do
     do: [build_mutation(nil, description, context, line)]
 
   # Swap a call's first two arguments.
+  # In a module body a swap mostly raises when the module compiles
+  # (`Enum.join(",", list)`).
   defp swap(_ast, _name, _swappable?, %{module_body: _}, _line), do: []
 
   defp swap({call, meta, [first, second | rest]}, name, true, context, line) do

@@ -6,7 +6,7 @@ defmodule Muex.Mutator.References do
   @definitions [:def, :defp, :defmacro, :defmacrop, :defguard, :defguardp, :defdelegate]
 
   @doc """
-  Whether deleting `stmt` leaves `others` naming something only `stmt`
+  Whether deleting `stmt` leaves `others` needing something only `stmt`
   defined.
 
   References are read from the AST as written, so one that a macro or

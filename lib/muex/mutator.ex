@@ -300,11 +300,9 @@ defmodule Muex.Mutator do
 
   defp enter_capture(context, _node), do: context
 
-  # A module body runs when the module compiles, so a mutant that makes it
-  # raise does not compile. Its code is walked with `context[:module_body]`
-  # set to the body's statements, and each of those statements with
-  # `context[:statement]` set too. A definition clears both: its body runs
-  # when called.
+  # A mutant that makes the module body raise does not compile.
+  # `statement_paths` lets `update_statement` mark the body's own statements.
+  # A definition drops both keys: its body runs when called.
   defp enter_module(context, {:defmodule, _meta, [_name, [{:do, body}]]}, path) do
     body_path = below(path, [2, 1, 0, 1])
 
@@ -562,9 +560,8 @@ defmodule Muex.Mutator do
 
   # Remote call: `Mod.fun(args)`. The function name is not offered, as a local
   # call's is not: renamed, the call names a function that does not exist,
-  # which fails to compile when the module body calls it. The `.` node, the
-  # module and the arguments are walked. `expr.field` is a map field access,
-  # not a call, so its field is offered as usual.
+  # which fails to compile when the module body calls it. `expr.field` is a
+  # map field access, not a call, so its field is offered as usual.
   defp collect_children(
          {{:., _dot_meta, [module, fun]} = dot, meta, args},
          mutators,
