@@ -51,7 +51,7 @@ These fixes enable full end-to-end mutation testing with high accuracy.
 
 ## Project Structure
 
-- `lib/calculator.ex` - Main calculator module with 13 functions covering arithmetic, mathematical operations, comparisons, and predicates
+- `lib/calculator.ex` - Main calculator module with 12 functions covering arithmetic, mathematical operations, comparisons, and predicates
 - `test/calculator_test.exs` - Comprehensive test suite with 47 tests
 - `mix.exs` - Project configuration with muex dependency
 
