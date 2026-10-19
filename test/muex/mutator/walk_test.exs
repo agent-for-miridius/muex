@@ -344,10 +344,10 @@ defmodule Muex.Mutator.WalkTest do
 
     test "no mutant of a pattern fails to compile" do
       # FunctionCall treated `|`, `<>` and `<<>>` in patterns as calls:
-      # removing one unbinds its variables. StatementDeletion and WithClause
-      # delete bindings that later code reads, a different flaw.
-      mutators =
-        Muex.Config.all_mutators() -- [Muex.Mutator.StatementDeletion, Muex.Mutator.WithClause]
+      # removing one unbinds its variables. StatementDeletion deleted the
+      # bindings the last line reads. WithClause still deletes `with` clauses
+      # whose bindings the body reads.
+      mutators = Muex.Config.all_mutators() -- [Muex.Mutator.WithClause]
 
       assert invalid_mutants(@patterns, mutators) == []
     end

@@ -11,21 +11,21 @@ defmodule Muex.Mutator.StatementDeletionTest do
         {:__block__, [line: 1],
          [
            {:=, [line: 1], [{:x, [], Elixir}, 1]},
-           {:+, [line: 2], [{:x, [], Elixir}, 2]}
+           {:+, [line: 2], [{:y, [], Elixir}, 2]}
          ]}
 
       mutations = StatementDeletion.mutate(ast, @context)
 
       assert [mutation] = mutations
       # Deleting the first statement collapses the block to the last expr
-      assert mutation.ast == {:+, [line: 2], [{:x, [], Elixir}, 2]}
+      assert mutation.ast == {:+, [line: 2], [{:y, [], Elixir}, 2]}
       assert mutation.description =~ "delete statement 1 of 2"
     end
 
     test "three statements: produces two mutations (first and second)" do
       stmt1 = {:=, [line: 1], [{:x, [], Elixir}, 1]}
       stmt2 = {:=, [line: 2], [{:y, [], Elixir}, 2]}
-      stmt3 = {:+, [line: 3], [{:x, [], Elixir}, {:y, [], Elixir}]}
+      stmt3 = {:result, [line: 3], []}
 
       ast = {:__block__, [line: 1], [stmt1, stmt2, stmt3]}
 
@@ -92,7 +92,7 @@ defmodule Muex.Mutator.StatementDeletionTest do
         {:__block__, [line: 5],
          [
            {:=, [line: 5], [{:x, [], Elixir}, 1]},
-           {:x, [line: 6], Elixir}
+           {:y, [line: 6], Elixir}
          ]}
 
       context = %{file: "lib/my_module.ex"}
@@ -147,6 +147,37 @@ defmodule Muex.Mutator.StatementDeletionTest do
       """
 
       assert deleted_statements(source) == [1, 2]
+    end
+  end
+
+  describe "mutate/2 - bindings" do
+    # The 1-based statement numbers StatementDeletion deletes in `body`.
+    defp deleted_in_body(body) do
+      {:__block__, _, _} = block = Code.string_to_quoted!(body)
+
+      for mutation <- StatementDeletion.mutate(block, @context) do
+        [_, n] = Regex.run(~r/delete statement (\d+) of/, mutation.description)
+        String.to_integer(n)
+      end
+    end
+
+    test "keeps a binding a later statement reads" do
+      assert deleted_in_body("""
+             {:ok, x} = fetch()
+             [_h | rest] = x
+             log(:done)
+             rest
+             """) == [3]
+    end
+
+    test "deletes a rebinding of a name already bound" do
+      assert deleted_in_body("""
+             x = x * 2
+             y = 1
+             y = y + x
+             ^x = check(y)
+             y
+             """) == [1, 3, 4]
     end
   end
 

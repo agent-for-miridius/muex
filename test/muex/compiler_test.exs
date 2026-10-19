@@ -264,9 +264,9 @@ defmodule Muex.CompilerTest do
         file_entry("""
         defmodule Sample do
           def run(a, b) do
-            x = a + b
-            y = x * 2
-            y - 1
+            a = a + b
+            b = b * a
+            b - 1
           end
         end
         """)
@@ -281,9 +281,9 @@ defmodule Muex.CompilerTest do
       mutation = Enum.find(mutations, &(&1.location.line == 3))
 
       assert {:ok, source} = Compiler.compile_to_source(mutation, entry, ElixirLang)
-      refute source =~ "x = a + b"
-      assert source =~ "y = x * 2"
-      assert source =~ "y - 1"
+      refute source =~ "a = a + b"
+      assert source =~ "b = b * a"
+      assert source =~ "b - 1"
     end
 
     test "every deletion actually changes the source", %{

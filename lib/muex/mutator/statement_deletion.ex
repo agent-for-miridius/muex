@@ -29,6 +29,13 @@ defmodule Muex.Mutator.StatementDeletion do
   matches a struct, leaves code that does not compile. Those deletions are
   skipped. Deleting one clause of several, or a definition nothing else in
   the module uses, is kept.
+
+  ## Bindings a later statement reads are not deleted
+
+  Deleting `x = compute()` when a later statement reads `x` leaves `x`
+  undefined. Such deletions are skipped unless `x` was already bound: the
+  statement reads it itself (`x = x * 2`) or an earlier statement in the
+  block binds it with `=`.
   """
   @behaviour Muex.Mutator
 
@@ -50,8 +57,10 @@ defmodule Muex.Mutator.StatementDeletion do
     # Skip the return value (ReturnValue handles it) and module attributes (see
     # the moduledoc — deleting them only manufactures unkillable survivors).
     |> Enum.reject(fn {stmt, idx} ->
+      {before, [_stmt | later]} = Enum.split(statements, idx)
+
       idx == last_idx or module_attribute?(stmt) or
-        still_referenced?(stmt, List.delete_at(statements, idx))
+        still_referenced?(stmt, before ++ later) or binds_what_later_reads?(stmt, before, later)
     end)
     |> Enum.map(fn {stmt, idx} ->
       remaining = List.delete_at(statements, idx)
@@ -272,6 +281,55 @@ defmodule Muex.Mutator.StatementDeletion do
       end)
 
     found
+  end
+
+  # Whether `stmt` binds a variable a `later` statement reads that was not
+  # already bound: by `stmt` reading it, or by an earlier statement's match.
+  # A variable bound outside the block, such as a parameter, is not seen when
+  # `stmt` does not read it, so `x = 5` over a parameter `x` is not deleted;
+  # that loses a mutant but never makes an invalid one.
+  defp binds_what_later_reads?(stmt, before, later) do
+    bound_before = Enum.flat_map(before, &vars_bound/1) ++ vars_read(stmt)
+    read_later = vars_in(later)
+
+    stmt
+    |> vars_bound()
+    |> Enum.any?(&(&1 not in bound_before and &1 in read_later))
+  end
+
+  # Variables a statement `pattern = value` (or `a = b = value`) binds. A
+  # binding nested deeper, such as `f(x = 1)`, is not seen.
+  defp vars_bound({:=, _, [left, right]}), do: vars_in(left) ++ vars_bound(right)
+  defp vars_bound(_stmt), do: []
+
+  # Variables in `ast` outside the left of its `=`s.
+  defp vars_read(ast) do
+    ast
+    |> Macro.prewalk(fn
+      {:=, meta, [_left, right]} -> {:=, meta, [nil, right]}
+      node -> node
+    end)
+    |> vars_in()
+  end
+
+  # Every variable named in `ast`, pinned ones aside, as `{name, context}`.
+  defp vars_in(ast) do
+    {_ast, vars} =
+      Macro.prewalk(ast, [], fn
+        {:^, _, _}, acc ->
+          {nil, acc}
+
+        {name, _, ctx} = node, acc when is_atom(name) and is_atom(ctx) ->
+          case Atom.to_string(name) do
+            "_" <> _ -> {node, acc}
+            _ -> {node, [{name, ctx} | acc]}
+          end
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    vars
   end
 
   defp module_attribute?({:@, _meta, _args}), do: true
