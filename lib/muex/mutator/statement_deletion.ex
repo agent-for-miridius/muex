@@ -193,7 +193,6 @@ defmodule Muex.Mutator.StatementDeletion do
 
   defp var_name({name, _meta, _ctx}), do: name
 
-  # Any `@`-prefixed module attribute (see the moduledoc).
   @definitions [:def, :defp, :defmacro, :defmacrop, :defguard, :defguardp, :defdelegate]
 
   # Whether deleting `stmt` leaves `others` naming something only `stmt`
@@ -332,6 +331,7 @@ defmodule Muex.Mutator.StatementDeletion do
     vars
   end
 
+  # Any `@`-prefixed module attribute (see the moduledoc).
   defp module_attribute?({:@, _meta, _args}), do: true
   defp module_attribute?(_), do: false
 

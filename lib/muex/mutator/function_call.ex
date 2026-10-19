@@ -139,8 +139,6 @@ defmodule Muex.Mutator.FunctionCall do
     ]
   end
 
-  # A pipe's target cannot be removed: `value |> nil` does not compile.
-  # `Muex.Mutator.Pipe` drops the whole stage instead.
   defp removal(_description, %{pipe_target: true}, _line), do: []
   defp removal(description, context, line), do: [build_mutation(nil, description, context, line)]
 

@@ -372,10 +372,8 @@ defmodule Muex.Mutator do
       collect(right, mutators, context, skip_calls, below(path, [2, 1]))
   end
 
-  # Pipe: `value |> call(args)`. The call takes `value` as its first argument,
-  # so it is not a whole expression on its own: `value |> nil` does not
-  # compile. The call itself is walked with `context[:pipe_target]` set; its
-  # arguments are not.
+  # Pipe: `value |> call(args)`. The call itself is walked with
+  # `context[:pipe_target]` set; its arguments are not.
   defp collect_children({:|>, _meta, [left, right]}, mutators, context, skip_calls, path) do
     collect(left, mutators, context, skip_calls, below(path, [2, 0])) ++
       collect(

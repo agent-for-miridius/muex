@@ -251,6 +251,8 @@ results:
 - The `/` of a function capture (`&Mod.fun/arity`, `&fun/arity`), which names
   the arity rather than dividing; division inside a capture, `&(&1 / 2)`, is
   still mutated
+- The head of a definition (`def add(a, b)`) and the `\\` of a default; the
+  parameters, default values and guard are still mutated
 
 This pruning is always on and requires no configuration. Literals inside function
 bodies still receive an accurate source line, so survived and suspicious mutants

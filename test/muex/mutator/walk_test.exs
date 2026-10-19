@@ -284,9 +284,6 @@ defmodule Muex.Mutator.WalkTest do
     """
 
     test "no mutant of a head fails to compile" do
-      # FunctionCall removed `add(a, b)`, leaving `def nil when ...`, and
-      # treated `\\\\`, `<>` and `|` in parameters as calls. StatementDeletion
-      # deleted `is_pos` and `scale`, which `zero` calls.
       assert invalid_mutants(@heads, Muex.Config.all_mutators()) == []
     end
 
@@ -343,10 +340,7 @@ defmodule Muex.Mutator.WalkTest do
     """
 
     test "no mutant of a pattern fails to compile" do
-      # FunctionCall treated `|`, `<>` and `<<>>` in patterns as calls:
-      # removing one unbinds its variables. StatementDeletion deleted the
-      # bindings the last line reads. WithClause still deletes `with` clauses
-      # whose bindings the body reads.
+      # WithClause still deletes `with` clauses whose bindings the body reads.
       mutators = Muex.Config.all_mutators() -- [Muex.Mutator.WithClause]
 
       assert invalid_mutants(@patterns, mutators) == []
@@ -372,7 +366,6 @@ defmodule Muex.Mutator.WalkTest do
     """
 
     test "no mutant of a pipe fails to compile" do
-      # FunctionCall removed the call a pipe feeds, leaving `xs |> nil`.
       assert invalid_mutants(@pipes, Muex.Config.all_mutators()) == []
     end
 
