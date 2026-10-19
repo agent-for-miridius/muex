@@ -105,6 +105,51 @@ defmodule Muex.Mutator.StatementDeletionTest do
     end
   end
 
+  describe "mutate/2 - definitions in a module body" do
+    @module """
+    defmodule Sample do
+      defstruct [:n]
+      defguard is_pos(x) when is_integer(x) and x > 0
+      defp helper(a, b \\\\ 1), do: a + b
+      def fact(0), do: 1
+      def fact(n) when is_pos(n), do: n * fact(n - 1)
+      def piped(x), do: x
+      def captured(x), do: x
+      defmacrop twice(x), do: quote(do: unquote(x) * 2)
+      def unused(x), do: x
+      def run(n), do: %__MODULE__{n: n |> piped() |> helper() |> twice()} && &captured/1
+    end
+    """
+
+    # The 1-based statement numbers StatementDeletion deletes in the module body.
+    defp deleted_statements(source) do
+      {:defmodule, _, [_alias, [do: body]]} = Code.string_to_quoted!(source)
+
+      for mutation <- StatementDeletion.mutate(body, @context) do
+        [_, n] = Regex.run(~r/delete statement (\d+) of/, mutation.description)
+        String.to_integer(n)
+      end
+    end
+
+    test "keeps a definition the rest of the module still uses" do
+      # 1 defstruct, 2 is_pos, 3 helper, 6 piped, 7 captured, 8 twice are used
+      # by later code; 4 and 5 are two clauses of fact/1; 9 is used by nothing.
+      assert deleted_statements(@module) == [4, 5, 9]
+    end
+
+    test "deletes a definition once its only caller is another clause of itself" do
+      source = """
+      defmodule Sample do
+        def loop(0), do: :done
+        def loop(n), do: loop(n - 1)
+        def run, do: :ok
+      end
+      """
+
+      assert deleted_statements(source) == [1, 2]
+    end
+  end
+
   describe "mutate/2 - non-matching nodes" do
     test "single-statement block returns empty" do
       ast = {:__block__, [line: 1], [{:x, [], Elixir}]}

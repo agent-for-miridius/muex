@@ -285,10 +285,9 @@ defmodule Muex.Mutator.WalkTest do
 
     test "no mutant of a head fails to compile" do
       # FunctionCall removed `add(a, b)`, leaving `def nil when ...`, and
-      # treated `\\\\`, `<>` and `|` in parameters as calls.
-      mutators = Muex.Config.all_mutators() -- [Muex.Mutator.StatementDeletion]
-
-      assert invalid_mutants(@heads, mutators) == []
+      # treated `\\\\`, `<>` and `|` in parameters as calls. StatementDeletion
+      # deleted `is_pos` and `scale`, which `zero` calls.
+      assert invalid_mutants(@heads, Muex.Config.all_mutators()) == []
     end
 
     test "the head is never offered; parameters, defaults and guards are" do
