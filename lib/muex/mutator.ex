@@ -205,6 +205,9 @@ defmodule Muex.Mutator do
       `defguard`, `defguardp`, `defdelegate`): `name(params)` and the `\\`
       of a default are never offered. The parameters, default values and
       guard are traversed.
+    * The name of a module attribute being set (`timeout(5_000)` in
+      `@timeout 5_000`): `@nil` does not compile. The `@` node and the
+      value are traversed.
 
   Inside a pattern the walk sets `context[:pattern]` to `true`, so a mutator
   can leave alone what is only valid as an expression. Patterns are a
@@ -403,6 +406,20 @@ defmodule Muex.Mutator do
        |> Enum.flat_map(fn {node, index} ->
          collect(node, mutators, context, skip_calls, below(path, [2, index]))
        end))
+  end
+
+  # Module attribute set: `@name value`. `name(value)` is not a call: `@`
+  # accepts only a name with at most one argument, so only the value is walked.
+  defp collect_children(
+         {:@, _meta, [{name, name_meta, [value]}]},
+         mutators,
+         context,
+         skip_calls,
+         path
+       )
+       when is_atom(name) do
+    context = update_line(context, {name, name_meta, []})
+    collect(value, mutators, context, skip_calls, below(path, [2, 0, 2, 0]))
   end
 
   # Match: `pattern = value`. The value keeps the enclosing context: inside a

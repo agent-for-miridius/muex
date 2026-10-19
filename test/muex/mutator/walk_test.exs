@@ -417,6 +417,30 @@ defmodule Muex.Mutator.WalkTest do
     end
   end
 
+  describe "module attributes" do
+    @attributes """
+    defmodule Muex.WalkTest.Attributes do
+      @timeout 5_000
+      @limits [1, max(2, 3)]
+      def run, do: @timeout * length(@limits)
+    end
+    """
+
+    test "no mutant of a module attribute fails to compile" do
+      assert invalid_mutants(@attributes, Muex.Config.all_mutators()) == []
+    end
+
+    test "an attribute's name is never offered; its value and the attribute are" do
+      mutations = @attributes |> ast!() |> Mutator.walk([FunctionCall, Literal], %{file: "s.ex"})
+      originals = Enum.map(mutations, &Macro.to_string(&1.original_ast))
+
+      refute "timeout(5000)" in originals
+      assert "@timeout 5000" in originals
+      assert 5_000 in Enum.map(mutations, & &1.original_ast)
+      assert "max(2, 3)" in originals
+    end
+  end
+
   describe "configurable skip_calls" do
     test "prunes configured DSL calls, leaving the rest intact" do
       ast =
