@@ -208,6 +208,10 @@ defmodule Muex.Mutator do
   except in `cond` and a `receive`'s `after`. A guard is an expression. The
   `<<>>` of a bitstring generator (`for <<b <- bin>>`) is not offered.
 
+  The call a pipe feeds (`f(y)` in `x |> f(y)`) is offered with
+  `context[:pipe_target]` set to `true`: it lacks its first argument, so it
+  cannot be replaced by a value.
+
   Callers can prune additional framework DSL calls by passing a list of
   call names (atoms) in `context[:skip_calls]`. For example,
   `[:attr, :slot, :scope, :pipeline]` removes Phoenix component and router
@@ -254,7 +258,8 @@ defmodule Muex.Mutator do
           false -> mutate_node(node, mutators, context, path)
         end
 
-      mutations ++ collect_children(node, mutators, context, skip_calls, path)
+      children_context = Map.delete(context, :pipe_target)
+      mutations ++ collect_children(node, mutators, children_context, skip_calls, path)
     end
   end
 
@@ -365,6 +370,21 @@ defmodule Muex.Mutator do
   defp collect_children({:=, _meta, [left, right]}, mutators, context, skip_calls, path) do
     collect_pattern(left, mutators, context, skip_calls, below(path, [2, 0])) ++
       collect(right, mutators, context, skip_calls, below(path, [2, 1]))
+  end
+
+  # Pipe: `value |> call(args)`. The call takes `value` as its first argument,
+  # so it is not a whole expression on its own: `value |> nil` does not
+  # compile. The call itself is walked with `context[:pipe_target]` set; its
+  # arguments are not.
+  defp collect_children({:|>, _meta, [left, right]}, mutators, context, skip_calls, path) do
+    collect(left, mutators, context, skip_calls, below(path, [2, 0])) ++
+      collect(
+        right,
+        mutators,
+        Map.put(context, :pipe_target, true),
+        skip_calls,
+        below(path, [2, 1])
+      )
   end
 
   # Generator or `with` clause: `pattern when guard <- value`.

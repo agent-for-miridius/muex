@@ -365,6 +365,30 @@ defmodule Muex.Mutator.WalkTest do
     end
   end
 
+  describe "pipes" do
+    @pipes """
+    defmodule Muex.WalkTest.Pipes do
+      def run(xs, f), do: xs |> Enum.map(f) |> Enum.reduce(0, f) |> max(length(xs))
+    end
+    """
+
+    test "no mutant of a pipe fails to compile" do
+      # FunctionCall removed the call a pipe feeds, leaving `xs |> nil`.
+      assert invalid_mutants(@pipes, Muex.Config.all_mutators()) == []
+    end
+
+    test "a pipe's target keeps its argument swap; its arguments are still removable" do
+      mutations = @pipes |> ast!() |> Mutator.walk([FunctionCall], %{file: "s.ex"})
+
+      changed =
+        for %{ast: ast, original_ast: original} <- mutations,
+            do: {Macro.to_string(original), ast && Macro.to_string(ast)}
+
+      assert {"Enum.reduce(0, f)", "Enum.reduce(f, 0)"} in changed
+      assert [{"length(xs)", nil}] == Enum.filter(changed, &match?({_, nil}, &1))
+    end
+  end
+
   describe "configurable skip_calls" do
     test "prunes configured DSL calls, leaving the rest intact" do
       ast =

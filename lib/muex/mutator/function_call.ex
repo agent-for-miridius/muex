@@ -8,7 +8,8 @@ defmodule Muex.Mutator.FunctionCall do
 
   A pattern holds no calls, so nothing in one is mutated. Removing a pattern
   unbinds its variables, and swapping `"pre" <> rest` makes a binary pattern
-  that does not compile.
+  that does not compile. The call a pipe feeds is not removed either, since
+  `value |> nil` does not compile; `Muex.Mutator.Pipe` drops the stage.
   """
   @behaviour Muex.Mutator
 
@@ -37,8 +38,7 @@ defmodule Muex.Mutator.FunctionCall do
         if special_form?(func) do
           []
         else
-          mutations = []
-          mutations = [build_mutation(nil, "remove #{func}() call", context, line) | mutations]
+          mutations = removal("remove #{func}() call", context, line)
 
           mutations =
             if length(args) >= 2 do
@@ -62,12 +62,7 @@ defmodule Muex.Mutator.FunctionCall do
 
       {{:., dot_meta, [module, func]}, meta, args} when is_list(args) and args != [] ->
         line = Keyword.get(meta, :line, 0)
-        mutations = []
-
-        mutations = [
-          build_mutation(nil, "remove #{inspect(module)}.#{func}() call", context, line)
-          | mutations
-        ]
+        mutations = removal("remove #{inspect(module)}.#{func}() call", context, line)
 
         mutations =
           if length(args) >= 2 do
@@ -143,6 +138,11 @@ defmodule Muex.Mutator.FunctionCall do
       :%
     ]
   end
+
+  # A pipe's target cannot be removed: `value |> nil` does not compile.
+  # `Muex.Mutator.Pipe` drops the whole stage instead.
+  defp removal(_description, %{pipe_target: true}, _line), do: []
+  defp removal(description, context, line), do: [build_mutation(nil, description, context, line)]
 
   defp swap_first_two([first, second | rest]) do
     [second, first | rest]
