@@ -196,7 +196,8 @@ defmodule Muex.Mutator do
     * Keyword/option keys: in a `key: value` pair only `value` is
       traversed, never the atom `key`.
     * The `/` of a function capture (`&Mod.fun/arity`, `&fun/arity`),
-      which names the arity; the function and the arity are traversed.
+      which names the arity; the function is traversed, and so is the
+      arity of a remote capture only.
     * The head of a definition (`def`, `defp`, `defmacro`, `defmacrop`,
       `defguard`, `defguardp`, `defdelegate`): `name(params)` and the `\\`
       of a default are never offered. The parameters, default values and
@@ -340,15 +341,15 @@ defmodule Muex.Mutator do
          path
        )
        when is_integer(arity) do
-    case function_reference?(function) do
-      true ->
+    case function_reference(function) do
+      nil ->
+        collect_args(args, mutators, context, skip_calls, below(path, [2]))
+
+      kind ->
         context = update_line(context, slash)
 
         collect(function, mutators, context, skip_calls, below(path, [2, 0, 2, 0])) ++
-          collect(arity, mutators, context, skip_calls, below(path, [2, 0, 2, 1]))
-
-      false ->
-        collect_args(args, mutators, context, skip_calls, below(path, [2]))
+          collect_arity(kind, arity, mutators, context, skip_calls, below(path, [2, 0, 2, 1]))
     end
   end
 
@@ -542,14 +543,24 @@ defmodule Muex.Mutator do
     do: collect(pattern, mutators, Map.put(context, :pattern, true), skip_calls, path)
 
   # The left operand of `/` in `&(left / arity)` when Elixir reads the capture
-  # as a function reference: a remote `Mod.fun` (no arguments) or a local `fun`.
-  defp function_reference?({{:., _dot_meta, [_module, fun]}, _meta, []}) when is_atom(fun),
-    do: true
+  # as a function reference: `:remote` for `Mod.fun` (no arguments), `:local`
+  # for `fun`.
+  defp function_reference({{:., _dot_meta, [_module, fun]}, _meta, []}) when is_atom(fun),
+    do: :remote
 
-  defp function_reference?({fun, _meta, context}) when is_atom(fun) and is_atom(context),
-    do: true
+  defp function_reference({fun, _meta, context}) when is_atom(fun) and is_atom(context),
+    do: :local
 
-  defp function_reference?(_left), do: false
+  defp function_reference(_left), do: nil
+
+  # A capture's arity. A remote capture of an arity that does not exist still
+  # compiles, so its arity is offered. A local, imported or operator capture
+  # of one fails to compile (`&+/3`), and which arities exist is not known
+  # here, so its arity is not.
+  defp collect_arity(:remote, arity, mutators, context, skip_calls, path),
+    do: collect(arity, mutators, context, skip_calls, path)
+
+  defp collect_arity(:local, _arity, _mutators, _context, _skip_calls, _path), do: []
 
   # Module alias segments: pure structural metadata.
   defp skip?({:__aliases__, _meta, _segments}, _skip_calls), do: true

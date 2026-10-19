@@ -216,10 +216,12 @@ defmodule Muex.Mutator.WalkTest do
       assert Enum.any?(mutations, &match?({:|, _meta, _args}, &1.original_ast))
     end
 
-    test "the `/` of a function capture is skipped but its operands are mutated" do
+    test "the `/` of a function capture is skipped; its function is mutated, and the arity of a remote capture only, since a missing local arity does not compile" do
       # `&Path.dirname/1` and `&double/1` put a `/` under `&` that names the
       # arity. FunctionCall treated it as a call and removed it or swapped its
       # arguments, Arithmetic as division: none of those is a valid capture.
+      # `&double/3` does not compile when `double/3` is not defined;
+      # `&Path.dirname/2` compiles and fails when called.
       ast =
         ast!("""
         defmodule Sample do
@@ -232,10 +234,21 @@ defmodule Muex.Mutator.WalkTest do
       refute Enum.any?(mutations, &match?({:/, _meta, _args}, &1.original_ast))
 
       # Pre-order: the function before its arity.
-      assert [:dirname, 1, 1, 2, 2] =
+      assert [:dirname, 1, 1] =
                mutations
                |> Enum.map(& &1.original_ast)
                |> Enum.filter(&(&1 in [:dirname, 1, 2]))
+    end
+
+    test "no mutant of a local, imported or operator capture fails to compile" do
+      source = """
+      defmodule Muex.WalkTest.Captures do
+        def double(x), do: x * 2
+        def run(xs), do: {Enum.map(xs, &double/1), Enum.reduce(xs, &+/2), Enum.reduce(xs, &max/2)}
+      end
+      """
+
+      assert invalid_mutants(source, Muex.Config.all_mutators()) == []
     end
 
     test "the operands of a capture's `/` take the `/` line" do
