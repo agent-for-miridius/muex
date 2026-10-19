@@ -318,7 +318,10 @@ Default: Number of CPU schedulers (`System.schedulers_online()`)
 
 ### Set Test Timeout
 
-Prevent hanging tests:
+Prevent hanging tests. The timeout counts from the moment ExUnit starts the
+suite, so starting the VM, compiling and starting the app are not counted.
+Those, and anything after the suite ends, are bounded separately by the larger
+of 60 seconds and six times `--timeout`.
 
 ```bash
 # 10 second timeout per mutation
@@ -1061,7 +1064,8 @@ mix muex --concurrency 32
 
 ### Timeout Tuning
 
-Adjust timeouts based on test suite speed:
+Adjust timeouts based on how long the test suite itself runs, not counting
+startup and compilation:
 
 ```bash
 # For fast test suites (< 1 second)
