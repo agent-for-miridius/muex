@@ -16,8 +16,12 @@ defmodule Muex.Mutator.FunctionCall do
 
   In a module body, outside its definitions, no call is swapped and only a
   statement of the body is removed: that code runs when the module compiles.
+  Nor is an attribute definition the module reads at compile time, in a
+  definition's head or in the module body.
   """
   @behaviour Muex.Mutator
+
+  alias Muex.Mutator.References
 
   @commutative_ops [:+, :*, :==, :!=, :===, :!==, :and, :or, :&&, :||]
   @impl true
@@ -44,14 +48,14 @@ defmodule Muex.Mutator.FunctionCall do
         if special_form?(func) do
           []
         else
-          removal("remove #{func}() call", context, line) ++
+          removal(ast, "remove #{func}() call", context, line) ++
             swap(ast, "#{func}", swappable?(func, context), context, line)
         end
 
       {{:., _dot_meta, [module, func]}, meta, args} when is_list(args) and args != [] ->
         line = Keyword.get(meta, :line, 0)
 
-        removal("remove #{inspect(module)}.#{func}() call", context, line) ++
+        removal(ast, "remove #{inspect(module)}.#{func}() call", context, line) ++
           swap(ast, "#{inspect(module)}.#{func}", true, context, line)
 
       _ ->
@@ -113,13 +117,21 @@ defmodule Muex.Mutator.FunctionCall do
   # A module body runs when the module compiles: a call whose value it uses
   # (`defstruct @fields`, `for f <- @fields`) cannot become `nil`, and one
   # with its arguments swapped mostly raises (`Enum.join(",", list)`). Only
-  # a statement of the body is removed there.
-  defp removal(_description, %{irreplaceable: true}, _line), do: []
+  # a statement of the body is removed there, and not an attribute definition
+  # the module reads at compile time (`x in @limits` in a guard).
+  defp removal(_ast, _description, %{irreplaceable: true}, _line), do: []
 
-  defp removal(_description, %{module_body: _} = context, _line)
+  defp removal(_ast, _description, %{module_body: _} = context, _line)
        when not is_map_key(context, :statement), do: []
 
-  defp removal(description, context, line), do: [build_mutation(nil, description, context, line)]
+  defp removal(ast, description, %{module_body: statements} = context, line) do
+    if References.still_referenced?(ast, List.delete(statements, ast)),
+      do: [],
+      else: [build_mutation(nil, description, context, line)]
+  end
+
+  defp removal(_ast, description, context, line),
+    do: [build_mutation(nil, description, context, line)]
 
   # Swap a call's first two arguments.
   defp swap(_ast, _name, _swappable?, %{module_body: _}, _line), do: []

@@ -541,6 +541,40 @@ defmodule Muex.Mutator.WalkTest do
       refute {"div(10, 3)", "div(3, 10)"} in changed
       refute {"div(10, 3)", nil} in changed
     end
+
+    @compile_time_reads """
+    defmodule Muex.WalkTest.CompileTimeReads do
+      @limits [1, 2]
+      @fields [:a, :b]
+      @names [:x]
+      @n 8
+      @runtime 5
+      @all @names ++ [:y]
+      defstruct @fields
+
+      for f <- @all do
+        def unquote(f)(), do: unquote(f)
+      end
+
+      def limited(x) when x in @limits, do: x
+      def sized(<<x::size(@n), _rest::binary>>), do: x
+      def run, do: @runtime
+    end
+    """
+
+    test "no mutant removing an attribute the module reads at compile time fails to compile" do
+      assert invalid_mutants(@compile_time_reads, [FunctionCall]) == []
+    end
+
+    test "an attribute definition read only in a function body is still removed" do
+      mutations = @compile_time_reads |> ast!() |> Mutator.walk([FunctionCall], %{file: "s.ex"})
+
+      removed =
+        for %{ast: nil, original_ast: {:@, _, [{_name, _, [_value]}]} = original} <- mutations,
+            do: Macro.to_string(original)
+
+      assert removed == ["@runtime 5"]
+    end
   end
 
   describe "remote calls" do

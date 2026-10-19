@@ -23,6 +23,9 @@ defmodule Muex.Mutator.References do
       :struct ->
         Enum.any?(others, &uses_struct?/1)
 
+      {:attribute, name} ->
+        Enum.any?(others, &reads_at_compile_time?(&1, name))
+
       nil ->
         false
     end
@@ -36,6 +39,10 @@ defmodule Muex.Mutator.References do
   end
 
   defp defined_by({kind, _meta, _args}) when kind in [:defstruct, :defexception], do: :struct
+
+  defp defined_by({:@, _meta, [{name, _attribute_meta, [_value]}]}) when is_atom(name),
+    do: {:attribute, name}
+
   defp defined_by(_stmt), do: nil
 
   defp arities_defined(stmt, name) do
@@ -82,6 +89,28 @@ defmodule Muex.Mutator.References do
 
     found
   end
+
+  # A read of `@name` that runs when the module compiles: in a definition's
+  # head (a pattern or guard), or in module-body code outside a definition.
+  # A definition's body reads it when called; an unset attribute reads as
+  # `nil` there, which still compiles.
+  defp reads_at_compile_time?({kind, _meta, [head | _rest]}, name) when kind in @definitions,
+    do: reads_at_compile_time?(head, name)
+
+  defp reads_at_compile_time?({:@, _meta, [{name, _attribute_meta, context}]}, name)
+       when is_atom(context),
+       do: true
+
+  defp reads_at_compile_time?({form, _meta, args}, name) when is_list(args),
+    do: reads_at_compile_time?(form, name) or reads_at_compile_time?(args, name)
+
+  defp reads_at_compile_time?({left, right}, name),
+    do: reads_at_compile_time?(left, name) or reads_at_compile_time?(right, name)
+
+  defp reads_at_compile_time?(list, name) when is_list(list),
+    do: Enum.any?(list, &reads_at_compile_time?(&1, name))
+
+  defp reads_at_compile_time?(_ast, _name), do: false
 
   # Any struct literal or `__struct__` counts: the module's own name is not
   # known here.
