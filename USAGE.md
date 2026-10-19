@@ -331,7 +331,7 @@ mix muex --timeout 10000
 mix muex --timeout 30000
 ```
 
-Default: 5000ms (5 seconds)
+Default: 10000ms (10 seconds)
 
 ### Enforce Minimum Mutation Score
 
