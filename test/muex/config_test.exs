@@ -481,12 +481,9 @@ defmodule Muex.ConfigTest do
   end
 
   describe "--mutator-paths" do
-    test "custom mutator from external path is discovered" do
-      dir =
-        Path.join(System.tmp_dir!(), "muex_custom_mutators_#{System.unique_integer([:positive])}")
+    @describetag :tmp_dir
 
-      File.mkdir_p!(dir)
-
+    test "custom mutator from external path is discovered", %{tmp_dir: dir} do
       File.write!(Path.join(dir, "noop_mutator.ex"), """
       defmodule Muex.Mutator.TestNoop do
         @behaviour Muex.Mutator
@@ -512,15 +509,7 @@ defmodule Muex.ConfigTest do
       :code.delete(Muex.Mutator.TestNoop)
     end
 
-    test "non-mutator files in path are ignored" do
-      dir =
-        Path.join(
-          System.tmp_dir!(),
-          "muex_custom_non_mutator_#{System.unique_integer([:positive])}"
-        )
-
-      File.mkdir_p!(dir)
-
+    test "non-mutator files in path are ignored", %{tmp_dir: dir} do
       File.write!(Path.join(dir, "helper.ex"), """
       defmodule Muex.TestHelper.NotAMutator do
         def hello, do: :world

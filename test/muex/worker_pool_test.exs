@@ -130,6 +130,81 @@ defmodule Muex.WorkerPoolTest do
     end
   end
 
+  describe "terminate/2" do
+    # The pool used to remove the sandboxes and leave each running `mix test`
+    # to finish, which then wrote its build files back into the removed tree.
+    @tag :tmp_dir
+    test "stops a running mutant's `mix test` before removing the sandboxes",
+         %{tmp_dir: tmp_dir} do
+      # The mutant's test writes its OS pid here, and blocks until it is read.
+      fifo = Path.join(tmp_dir, "started")
+      {_, 0} = System.cmd("mkfifo", [fifo])
+      project = Path.join(tmp_dir, "project")
+      write_hanging_project!(project, fifo)
+
+      {:ok, pool} = GenServer.start(WorkerPool, max_workers: 1)
+      {:ok, ast} = Code.string_to_quoted(File.read!(Path.join(project, "lib/hang.ex")))
+
+      [mutation | _] =
+        Muex.Mutator.walk(ast, [Muex.Mutator.Literal], %{file: "lib/hang.ex"})
+
+      spawn(fn ->
+        WorkerPool.run_mutations(
+          pool,
+          [mutation],
+          %{"lib/hang.ex" => %{path: "lib/hang.ex", ast: ast, module_name: Hang}},
+          Muex.Language.Elixir,
+          %{},
+          %{"lib/hang.ex" => Hang},
+          timeout_ms: 60_000,
+          project_root: project,
+          test_paths: [Path.join(project, "test")]
+        )
+      end)
+
+      os_pid = File.read!(fifo)
+      on_exit(fn -> System.cmd("kill", ["-9", os_pid], stderr_to_stdout: true) end)
+      [%{base: base} | _] = :sys.get_state(pool).sandboxes
+
+      GenServer.stop(pool, :shutdown)
+
+      assert {_, 1} = System.cmd("ps", ["-p", os_pid], stderr_to_stdout: true)
+      refute File.exists?(base)
+    end
+  end
+
+  defp write_hanging_project!(project, fifo) do
+    files = %{
+      "mix.exs" => """
+      defmodule Hang.MixProject do
+        use Mix.Project
+        def project, do: [app: :hang, version: "0.1.0"]
+      end
+      """,
+      "lib/hang.ex" => "defmodule Hang do\n  def one, do: 1\nend\n",
+      "test/test_helper.exs" => "ExUnit.start()\n",
+      # Passes unmutated, so the baseline runs; a mutant hangs.
+      "test/hang_test.exs" => """
+      defmodule HangTest do
+        use ExUnit.Case
+
+        test "one" do
+          if Hang.one() != 1 do
+            File.write!(#{inspect(fifo)}, System.pid())
+            Process.sleep(:infinity)
+          end
+        end
+      end
+      """
+    }
+
+    for {path, content} <- files do
+      full = Path.join(project, path)
+      File.mkdir_p!(Path.dirname(full))
+      File.write!(full, content)
+    end
+  end
+
   # Language adapters that fail while rendering the mutant, which the worker
   # does after choosing tests and before anything touches the sandbox.
   defmodule RaisingAdapter do
