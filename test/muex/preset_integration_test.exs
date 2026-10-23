@@ -42,11 +42,13 @@ defmodule Muex.PresetIntegrationTest do
     refute Enum.any?(mutations, &(&1.location.line == 0))
   end
 
-  test "without a preset, attr/slot option atoms still produce noise (baseline)" do
+  test "without a preset, attr/slot literal arguments are not offered either, as module-body call arguments" do
     ast = Code.string_to_quoted!(@component)
     mutations = Mutator.walk(ast, [Literal], %{file: "card.ex"})
     originals = Enum.map(mutations, & &1.original_ast)
 
-    assert :class in originals or :inner_block in originals
+    refute :class in originals
+    refute :inner_block in originals
+    refute :string in originals
   end
 end

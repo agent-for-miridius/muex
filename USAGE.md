@@ -266,8 +266,11 @@ results:
   swaps, FunctionCall's removal of anything but an attribute definition or the
   last statement (other statements are left to StatementDeletion), the removal
   of an attribute definition that a guard, pattern or the module body reads,
-  and the Erlang module of a remote call (`:erlang` in
-  `:erlang.atom_to_binary(:ok)`)
+  the Erlang module of a remote call (`:erlang` in
+  `:erlang.atom_to_binary(:ok)`), and a literal argument of a named call or a
+  literal keyword option value (`:a` in `Map.fetch!(m, :a)`, `true` in
+  `accumulate: true`); operator operands and `defstruct` defaults are still
+  mutated
 
 This pruning is always on and requires no configuration. Literals inside function
 bodies still receive an accurate source line, so survived and suspicious mutants

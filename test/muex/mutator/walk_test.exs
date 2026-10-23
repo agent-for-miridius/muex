@@ -3,6 +3,7 @@ defmodule Muex.Mutator.WalkTest do
 
   alias Muex.Mutator
   alias Muex.Mutator.Arithmetic
+  alias Muex.Mutator.Boolean
   alias Muex.Mutator.FunctionCall
   alias Muex.Mutator.Literal
   alias Muex.Mutator.StatementDeletion
@@ -422,7 +423,7 @@ defmodule Muex.Mutator.WalkTest do
     @attributes """
     defmodule Muex.WalkTest.Attributes do
       @timeout 5_000
-      @limits [1, max(2, 3)]
+      @limits [1, 2 + 3]
       def run, do: @timeout * length(@limits)
     end
     """
@@ -641,6 +642,37 @@ defmodule Muex.Mutator.WalkTest do
              ]
     end
 
+    @call_arguments """
+    defmodule Muex.WalkTest.CallArguments do
+      Module.register_attribute(__MODULE__, :acc, accumulate: true)
+      @acc :a
+      @m Map.fetch!(%{a: 1}, :a)
+      @n 5 * 1000
+      @flag if(@n > 1, do: :big, else: :small)
+      defstruct [:z, y: 2] ++ @acc
+      def run, do: {@m, @n, @flag, Map.fetch!(%{a: 1}, :a)}
+    end
+    """
+
+    test "no Literal or Boolean mutant of a module-body call's arguments fails to compile" do
+      assert invalid_mutants(@call_arguments, [Literal, Boolean]) == []
+    end
+
+    test "operands, defstruct defaults, do blocks and function bodies still have literal mutants" do
+      mutations = @call_arguments |> ast!() |> Mutator.walk([Literal], %{file: "s.ex"})
+
+      offered =
+        for %{original_ast: original, location: %{line: line}} <- mutations, do: {line, original}
+
+      assert {4, 1} in offered
+      assert {5, 5} in offered
+      assert {6, :big} in offered
+      assert {7, 2} in offered
+      assert {8, :a} in offered
+      refute {2, :acc} in offered
+      refute {4, :a} in offered
+    end
+
     test "no mutant removing an accumulating attribute's registration fails to compile" do
       assert invalid_mutants(@accumulated, [FunctionCall, StatementDeletion]) == []
     end
@@ -702,7 +734,6 @@ defmodule Muex.Mutator.WalkTest do
 
       assert :key in originals
       assert :erlang in originals
-      assert :acc in originals
     end
 
     test "an Erlang module is offered in a function but not in the module body" do
@@ -722,7 +753,7 @@ defmodule Muex.Mutator.WalkTest do
       ast =
         ast!("""
         defmodule Sample do
-          attr :class, :string
+          attr :class, :string, default: "a" <> "b"
           def run, do: 7
         end
         """)
@@ -730,8 +761,8 @@ defmodule Muex.Mutator.WalkTest do
       with_skip = Mutator.walk(ast, [Literal], %{file: "s.ex", skip_calls: [:attr]})
       without_skip = Mutator.walk(ast, [Literal], %{file: "s.ex"})
 
-      refute Enum.any?(with_skip, &(&1.original_ast in [:class, :string]))
-      assert Enum.any?(without_skip, &(&1.original_ast in [:class, :string]))
+      refute Enum.any?(with_skip, &(&1.original_ast in ["a", "b"]))
+      assert Enum.any?(without_skip, &(&1.original_ast in ["a", "b"]))
       # The unrelated function body literal is still mutated.
       assert Enum.any?(with_skip, &(&1.original_ast == 7))
     end
@@ -753,11 +784,12 @@ defmodule Muex.Mutator.WalkTest do
       # would not fail loudly: the mutant would quietly rewrite every equal
       # node on its line again. This source goes through every clause of the
       # walk: map and struct updates, captures, remote calls, keyword and
-      # literal pairs, lists, attributes and blocks.
+      # literal pairs, lists, attributes, blocks and module-body call options.
       ast =
         ast!("""
         defmodule Sample do
           @limit 10
+          @opts Keyword.get([k: 1], :k, max(1, 2 + 3), default: [4], fun: min(5, 6))
           def run(s, xs) do
             s = %{hd([s]) | count: s.count + 1, seen: [1, 2 + 3]}
             t = %Sample.State{s | total: {s.count * 2, :ok}}

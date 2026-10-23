@@ -174,6 +174,13 @@ defmodule Muex.Mutator do
   # Forms whose first argument is a function head rather than a call.
   @definitions [:def, :defp, :defmacro, :defmacrop, :defguard, :defguardp, :defdelegate]
 
+  # Forms that are not calls by name: `case`, `quote`, `{}` and the like.
+  @special_forms Keyword.keys(Kernel.SpecialForms.__info__(:macros))
+
+  # The keyword keys of a call's `do` block (`if c, do: x, else: y`), whose
+  # values are code rather than options.
+  @blocks [:do, :else, :after, :rescue, :catch]
+
   @doc """
   Walks an AST and collects mutations from all registered mutators.
 
@@ -214,6 +221,12 @@ defmodule Muex.Mutator do
       traversed, and so is the field of a map field access (`m.key`).
     * In a module body, the Erlang module of a remote call (`:erlang` in
       `:erlang.atom_to_binary(:ok)`), for the same reason.
+    * In a module body, a literal argument of a named call, local or remote
+      (`:a` in `Map.fetch!(map, :a)`), and the literal value of a trailing
+      keyword option (`true` in `accumulate: true`): that code runs when the
+      module compiles, where a changed argument can make the call raise.
+      An operator's operands, `defstruct` and `defexception`'s arguments,
+      and the `do`/`else` blocks of a call such as `if` are still walked.
 
   Inside a pattern the walk sets `context[:pattern]` to `true`, so a mutator
   can leave alone what is only valid as an expression. Patterns are a
@@ -562,10 +575,15 @@ defmodule Muex.Mutator do
   # `Macro.traverse/4`, which does not visit the call name itself.
   defp collect_children({form, _meta, args}, mutators, context, skip_calls, path)
        when is_atom(form) do
-    if sigil?(form) do
-      collect_sigil(args, mutators, context, skip_calls, below(path, [2]))
-    else
-      collect_args(args, mutators, context, skip_calls, below(path, [2]))
+    cond do
+      sigil?(form) ->
+        collect_sigil(args, mutators, context, skip_calls, below(path, [2]))
+
+      named_call?(form, args) ->
+        collect_call_args(args, mutators, context, skip_calls, below(path, [2]))
+
+      true ->
+        collect_args(args, mutators, context, skip_calls, below(path, [2]))
     end
   end
 
@@ -591,7 +609,7 @@ defmodule Muex.Mutator do
           collect_module(module, mutators, dot_context, skip_calls, below(path, [0, 2, 0]))
       end
 
-    dot_mutations ++ collect_args(args, mutators, context, skip_calls, below(path, [2]))
+    dot_mutations ++ collect_call_args(args, mutators, context, skip_calls, below(path, [2]))
   end
 
   # Call with a non-atom form (e.g. an anonymous function call `f.(x)`):
@@ -602,14 +620,22 @@ defmodule Muex.Mutator do
   end
 
   # Two-element tuple: a keyword pair or literal pair. Never mutate an atom
-  # key; always traverse the value.
+  # key; traverse the value, unless it is the literal value of a module-body
+  # call's option (see `collect_call_args/5`), which consumes the flag.
   defp collect_children({left, right}, mutators, context, skip_calls, path) do
+    {options?, context} = Map.pop(context, :options, false)
+
     left_mutations =
       if is_atom(left),
         do: [],
         else: collect(left, mutators, context, skip_calls, below(path, [0]))
 
-    left_mutations ++ collect(right, mutators, context, skip_calls, below(path, [1]))
+    right_mutations =
+      if options? and literal?(right) and left not in @blocks,
+        do: [],
+        else: collect(right, mutators, context, skip_calls, below(path, [1]))
+
+    left_mutations ++ right_mutations
   end
 
   defp collect_children(list, mutators, context, skip_calls, path) when is_list(list) do
@@ -628,6 +654,44 @@ defmodule Muex.Mutator do
 
   defp collect_module(module, mutators, context, skip_calls, path),
     do: collect(module, mutators, context, skip_calls, path)
+
+  # A named call's arguments. In a module body the call runs when the module
+  # compiles, and a changed literal argument can make it raise there
+  # (`Map.fetch!(map, :mutated_atom)`, `accumulate: false` for
+  # `Module.register_attribute/3`), so a literal argument is not offered, nor
+  # the literal value of a trailing keyword list's option. Elsewhere the call
+  # raises when run, so its arguments are walked as usual.
+  defp collect_call_args(args, mutators, %{module_body: _} = context, skip_calls, path) do
+    last = length(args) - 1
+
+    args
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {arg, index} ->
+      arg_context =
+        if index == last and Keyword.keyword?(arg),
+          do: Map.put(context, :options, true),
+          else: context
+
+      if literal?(arg),
+        do: [],
+        else: collect(arg, mutators, arg_context, skip_calls, below(path, [index]))
+    end)
+  end
+
+  defp collect_call_args(args, mutators, context, skip_calls, path),
+    do: collect_args(args, mutators, context, skip_calls, path)
+
+  # A call by name rather than an operator or a special form. `defstruct`
+  # and `defexception` are left out: their arguments are field names and
+  # default values, and a changed default still compiles.
+  defp named_call?(form, args) when is_list(args) do
+    form not in @special_forms and form not in [:defstruct, :defexception] and
+      not Macro.operator?(form, length(args))
+  end
+
+  defp named_call?(_form, _args), do: false
+
+  defp literal?(ast), do: is_atom(ast) or is_number(ast) or is_binary(ast) or ast == []
 
   # Args may be a list (normal call) or an atom such as `nil`/`Elixir` for
   # variables and zero-arity forms, which carry no child nodes. `path` is the
