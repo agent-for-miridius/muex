@@ -1,0 +1,7 @@
+{
+  "enabledPlugins": {
+    "merge-local@miridius-public": true,
+    "manager@miridius-public": true,
+    "decisions@miridius-public": true
+  }
+}
