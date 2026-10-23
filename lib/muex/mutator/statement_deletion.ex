@@ -22,6 +22,15 @@ defmodule Muex.Mutator.StatementDeletion do
   (an "invalid" mutant). Neither is a meaningful test-quality signal, so
   `@`-attribute statements are skipped entirely.
 
+  ## Directives are not deleted
+
+  Code after `use`, `import` or `require` may need what it brings in: a
+  macro (`schema` after `use Ecto.Schema`) or an imported function, and
+  without it that code does not compile. Which names a directive brings in is
+  not known here, so `use`, `import`, `alias` and `require` are never
+  deleted. Deleting an `alias` leaves calls to a module that does not exist,
+  which at best only raise.
+
   ## Definitions the module still uses are not deleted
 
   Deleting the last clause of a function, macro or guard that the rest of
@@ -43,6 +52,8 @@ defmodule Muex.Mutator.StatementDeletion do
   alias Muex.Mutator.Bindings
   alias Muex.Mutator.References
 
+  @directives [:use, :import, :alias, :require]
+
   @impl true
   def name, do: "StatementDeletion"
 
@@ -63,7 +74,7 @@ defmodule Muex.Mutator.StatementDeletion do
     |> Enum.reject(fn {stmt, idx} ->
       {before, [_stmt | later]} = Enum.split(statements, idx)
 
-      idx == last_idx or module_attribute?(stmt) or
+      idx == last_idx or module_attribute?(stmt) or directive?(stmt) or
         References.still_referenced?(stmt, before ++ later) or
         Bindings.binds_what_later_reads?(stmt, before, later)
     end)
@@ -201,6 +212,10 @@ defmodule Muex.Mutator.StatementDeletion do
   # Any `@`-prefixed module attribute (see the moduledoc).
   defp module_attribute?({:@, _meta, _args}), do: true
   defp module_attribute?(_), do: false
+
+  # `use`, `import`, `alias` or `require` (see the moduledoc).
+  defp directive?({form, _meta, args}) when form in @directives and is_list(args), do: true
+  defp directive?(_), do: false
 
   # A block with one remaining statement collapses to that statement.
   defp simplify_block(_meta, [single]), do: single

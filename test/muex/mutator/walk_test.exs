@@ -629,6 +629,33 @@ defmodule Muex.Mutator.WalkTest do
     end
   end
 
+  describe "directives" do
+    @directives """
+    defmodule Muex.WalkTest.Directives do
+      import Bitwise
+      require Integer
+      alias String, as: S
+      @odd band(3, 1)
+      def unused, do: nil
+
+      def run(x) do
+        import Bitwise, only: [bxor: 2]
+        S.downcase("b")
+        y = bxor(x, 1)
+        {y, Integer.is_even(y), S.upcase("a"), @odd}
+      end
+    end
+    """
+
+    test "no directive is deleted, and other statements still are" do
+      mutations = @directives |> ast!() |> Mutator.walk([StatementDeletion], %{file: "s.ex"})
+      deleted = for %{location: %{line: line}} <- mutations, do: line
+
+      assert Enum.sort(deleted) == [6, 10]
+      assert invalid_mutants(@directives, [StatementDeletion]) == []
+    end
+  end
+
   describe "remote calls" do
     @remote_calls """
     defmodule Muex.WalkTest.RemoteCalls do
