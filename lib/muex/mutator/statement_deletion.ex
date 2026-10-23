@@ -34,12 +34,20 @@ defmodule Muex.Mutator.StatementDeletion do
 
   ## Definitions the module still uses are not deleted
 
-  Deleting the last clause of a function, macro or guard that the rest of
-  the module calls or captures, or a `defstruct` while the module builds or
-  matches a struct, or a `Module.register_attribute/3` whose attribute the
-  module reads at compile time, leaves code that does not compile. Those
-  deletions are skipped. Deleting one clause of several, or a definition
-  nothing else in the module uses, is kept.
+  Deleting the last clause of a function, private macro or guard that the
+  rest of the module calls or captures, or a `Module.register_attribute/3`
+  whose attribute the module reads at compile time, leaves code that does
+  not compile. Those deletions are skipped. Deleting one clause of several,
+  or a definition nothing else in the module uses, is kept.
+
+  ## Structs and public macros are not deleted
+
+  A `defstruct`, a `defexception`, a clause of a public `defmacro`, and a
+  `defmodule` that defines one of them are never deleted, even when nothing
+  else in the file uses them. Another module, a test included, may build
+  the struct or call the macro, and then does not compile; when nothing
+  does, a test can hardly tell it is gone. Which other files use them is
+  not known here.
 
   ## Bindings a later statement reads are not deleted
 

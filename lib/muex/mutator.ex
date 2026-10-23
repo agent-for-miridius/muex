@@ -227,6 +227,9 @@ defmodule Muex.Mutator do
       module compiles, where a changed argument can make the call raise.
       An operator's operands, `defstruct` and `defexception`'s arguments,
       and the `do`/`else` blocks of a call such as `if` are still walked.
+    * A field name in a `defstruct` or `defexception` (`:a` in
+      `defstruct [:a, b: 1]`): renamed, it breaks code that builds the
+      struct, in this module or another. Default values are still walked.
 
   Inside a pattern the walk sets `context[:pattern]` to `true`, so a mutator
   can leave alone what is only valid as an expression. Patterns are a
@@ -302,6 +305,7 @@ defmodule Muex.Mutator do
         context
         |> Map.drop([:irreplaceable, :statement])
         |> enter_capture(node)
+        |> enter_struct(node)
         |> enter_module(node, path)
 
       mutations ++ collect_children(node, mutators, children_context, skip_calls, path)
@@ -315,6 +319,14 @@ defmodule Muex.Mutator do
     do: Map.put(context, :capture, true)
 
   defp enter_capture(context, _node), do: context
+
+  # A bare atom in a list in `defstruct` or `defexception` names a field;
+  # see `collect_list/5`.
+  defp enter_struct(context, {kind, _meta, args})
+       when kind in [:defstruct, :defexception] and is_list(args),
+       do: Map.put(context, :fields, true)
+
+  defp enter_struct(context, _node), do: context
 
   # A mutant that makes the module body raise does not compile.
   # `statement_paths` lets `update_statement` mark the body's own statements.
@@ -621,9 +633,11 @@ defmodule Muex.Mutator do
 
   # Two-element tuple: a keyword pair or literal pair. Never mutate an atom
   # key; traverse the value, unless it is the literal value of a module-body
-  # call's option (see `collect_call_args/5`), which consumes the flag.
+  # call's option (see `collect_call_args/5`), which consumes the flag. In a
+  # struct definition the value is a default, not field names.
   defp collect_children({left, right}, mutators, context, skip_calls, path) do
     {options?, context} = Map.pop(context, :options, false)
+    context = Map.delete(context, :fields)
 
     left_mutations =
       if is_atom(left),
@@ -706,11 +720,17 @@ defmodule Muex.Mutator do
     collect(args, mutators, context, skip_calls, path)
   end
 
+  # In a struct definition a bare atom in a list is a field name, which other
+  # code builds the struct with (`%S{a: 1}`), so it is not offered.
   defp collect_list(list, mutators, context, skip_calls, path) do
     list
     |> Enum.with_index()
-    |> Enum.flat_map(fn {node, index} ->
-      collect(node, mutators, context, skip_calls, below(path, [index]))
+    |> Enum.flat_map(fn
+      {node, _index} when is_atom(node) and is_map_key(context, :fields) ->
+        []
+
+      {node, index} ->
+        collect(node, mutators, context, skip_calls, below(path, [index]))
     end)
   end
 

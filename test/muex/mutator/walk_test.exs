@@ -688,6 +688,34 @@ defmodule Muex.Mutator.WalkTest do
     end
   end
 
+  describe "struct definitions" do
+    @fields """
+    defmodule Muex.WalkTest.Fields do
+      defstruct [:a, b: [:x]]
+      def new, do: %__MODULE__{a: 1}
+    end
+    """
+
+    test "no field name is offered, and defaults still are" do
+      mutations = @fields |> ast!() |> Mutator.walk([Literal], %{file: "s.ex"})
+      originals = Enum.map(mutations, & &1.original_ast)
+
+      refute :a in originals
+      assert :x in originals
+      assert invalid_mutants(@fields, [Literal]) == []
+    end
+
+    test "a defexception is not removed" do
+      source = """
+      defmodule Muex.WalkTest.FieldsError do
+        defexception [:message]
+      end
+      """
+
+      assert source |> ast!() |> Mutator.walk([FunctionCall], %{file: "s.ex"}) == []
+    end
+  end
+
   describe "directives" do
     @directives """
     defmodule Muex.WalkTest.Directives do

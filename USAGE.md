@@ -262,6 +262,11 @@ results:
   still mutated
 - The function name of a remote call or capture (`join` in `Enum.join(list, ",")`);
   the module and arguments are still mutated
+- A field name in a `defstruct` or `defexception` (`:a` in `defstruct [:a, b: 1]`),
+  which other code builds the struct with; default values are still mutated
+- The deletion of a `defstruct`, a `defexception`, a public `defmacro` clause, or
+  a `defmodule` that defines one, which other files, tests included, may use
+  when they compile
 - In a module body outside its definitions, which runs at compile time, argument
   swaps, FunctionCall's removal of anything but an attribute definition or the
   last statement (other statements are left to StatementDeletion), the removal

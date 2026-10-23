@@ -19,7 +19,8 @@ defmodule Muex.Mutator.FunctionCall do
   runs when the module compiles, and `Muex.Mutator.StatementDeletion` deletes
   the other statements. Nor is a statement removed that defines what the
   module reads at compile time, such as an attribute read in a definition's
-  head or in the module body.
+  head or in the module body, or a `defexception`, which other modules may
+  build.
   """
   @behaviour Muex.Mutator
 

@@ -1,27 +1,36 @@
 defmodule Muex.Mutator.References do
   @moduledoc false
   # What a module-body statement defines, and whether the rest of the module
-  # still uses it, for mutators that delete or remove one statement.
+  # or another module may still use it, for mutators that delete or remove
+  # one statement.
 
   @definitions [:def, :defp, :defmacro, :defmacrop, :defguard, :defguardp, :defdelegate]
 
   @doc """
   Whether deleting `stmt` leaves `others` needing something only `stmt`
-  defined.
+  defined, or may leave another module needing it.
+
+  A struct (`defstruct`, `defexception`), a clause of a public macro, and a
+  `defmodule` that defines either count as referenced whatever `others`
+  hold: a module that builds the struct or calls the macro does not compile
+  without it, and which modules do is not known from one file. When none
+  does, a test can hardly tell it is gone.
 
   References are read from the AST as written, so one that a macro or
   `unquote` builds is missed and its deletion still does not compile; so is a
-  use from another file, such as a public macro, guard or struct.
+  use from another file of a public guard.
   """
   @spec still_referenced?(Macro.t(), [Macro.t()]) :: boolean()
+  def still_referenced?({:defmacro, _meta, [_head | _]}, _others), do: true
+
   def still_referenced?(stmt, others) do
     case defined_by(stmt) do
       {:function, name, arities} ->
         needed = Enum.reduce(others, arities, &(&2 -- arities_defined(&1, name)))
         needed != [] and Enum.any?(others, &references?(&1, name, needed))
 
-      :struct ->
-        Enum.any?(others, &uses_struct?/1)
+      :export ->
+        true
 
       {:attribute, name} ->
         Enum.any?(others, &reads_at_compile_time?(&1, name))
@@ -38,7 +47,17 @@ defmodule Muex.Mutator.References do
     end
   end
 
-  defp defined_by({kind, _meta, _args}) when kind in [:defstruct, :defexception], do: :struct
+  defp defined_by({kind, _meta, _args}) when kind in [:defstruct, :defexception], do: :export
+
+  defp defined_by({:defmodule, _meta, [_name, [{:do, body}]]}) do
+    statements =
+      case body do
+        {:__block__, _block_meta, statements} -> statements
+        statement -> [statement]
+      end
+
+    if Enum.any?(statements, &still_referenced?(&1, [])), do: :export
+  end
 
   defp defined_by({:@, _meta, [{name, _attribute_meta, [_value]}]}) when is_atom(name),
     do: {:attribute, name}
@@ -121,18 +140,4 @@ defmodule Muex.Mutator.References do
     do: Enum.any?(list, &reads_at_compile_time?(&1, name))
 
   defp reads_at_compile_time?(_ast, _name), do: false
-
-  # Any struct literal or `__struct__` counts: the module's own name is not
-  # known here.
-  defp uses_struct?(ast) do
-    {_ast, found} =
-      Macro.prewalk(ast, false, fn
-        node, true -> {node, true}
-        {:%, _, _} = node, false -> {node, true}
-        :__struct__ = node, false -> {node, true}
-        node, false -> {node, false}
-      end)
-
-    found
-  end
 end

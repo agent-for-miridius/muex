@@ -137,6 +137,56 @@ defmodule Muex.Mutator.StatementDeletionTest do
       assert deleted_statements(@module) == [4, 5, 9]
     end
 
+    test "keeps a struct and a public macro that other modules may use" do
+      source = """
+      defmodule Sample do
+        defstruct [:n]
+        defmacro pub(x), do: x
+        defmacro pub(x, y), do: {x, y}
+        defmacrop priv(x), do: x
+        def run, do: :ok
+      end
+      """
+
+      exception = """
+      defmodule SampleError do
+        defexception [:message]
+        def run, do: :ok
+      end
+      """
+
+      assert deleted_statements(source) == [4]
+      assert deleted_statements(exception) == []
+    end
+
+    test "keeps a module that defines a struct or a public macro" do
+      block =
+        Code.string_to_quoted!("""
+        defmodule WithStruct do
+          defstruct [:n]
+        end
+
+        defmodule Outer do
+          defmodule WithMacro do
+            defmacro m(x), do: x
+          end
+        end
+
+        defmodule Plain do
+          def run, do: :ok
+        end
+
+        defmodule Last do
+        end
+        """)
+
+      deleted =
+        for mutation <- StatementDeletion.mutate(block, @context),
+            do: mutation.description
+
+      assert deleted == ["StatementDeletion: delete statement 3 of 4"]
+    end
+
     test "deletes a definition once its only caller is another clause of itself" do
       source = """
       defmodule Sample do
