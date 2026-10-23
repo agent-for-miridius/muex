@@ -224,8 +224,9 @@ defmodule Muex.Mutator do
   `context[:irreplaceable]` set to `true`. That is the call a pipe feeds
   (`f(y)` in `x |> f(y)`), which lacks its first argument, the text of a
   sigil (`"ab+c"` in `~r/ab+c/i`), which Kernel's sigils require as a string,
-  and the right side of `in` in a guard, which must be a list or range when
-  the guard compiles. A sigil's modifiers are not offered.
+  the right side of `in` in a guard, which must be a list or range when
+  the guard compiles, and an operand of `<>`, which Kernel rejects as a
+  literal that is not a binary. A sigil's modifiers are not offered.
 
   A module body runs when the module compiles. Outside its definitions the
   walk sets `context[:module_body]` to the body's statements, and also sets
@@ -545,6 +546,14 @@ defmodule Muex.Mutator do
         skip_calls,
         below(path, [2, 1])
       )
+  end
+
+  # `left <> right`: Kernel rejects an operand that is a literal but not a
+  # binary (`nil <> "x"`) when it compiles, so both are walked with
+  # `context[:irreplaceable]` set.
+  defp collect_children({:<>, _meta, [_left, _right] = args}, mutators, context, skip_calls, path) do
+    context = Map.put(context, :irreplaceable, true)
+    collect_args(args, mutators, context, skip_calls, below(path, [2]))
   end
 
   # Call with an atom form: descend into args only. This mirrors

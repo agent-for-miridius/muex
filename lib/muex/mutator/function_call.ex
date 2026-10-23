@@ -11,7 +11,7 @@ defmodule Muex.Mutator.FunctionCall do
   that does not compile. A node the walk marks `:irreplaceable` is not
   removed either: `value |> nil` does not compile (`Muex.Mutator.Pipe` drops
   the stage), nor does a sigil with `nil` for its text, nor `x in nil` in a
-  guard. The arguments of a
+  guard, nor `nil <> "x"`. The arguments of a
   sigil, `raise`, `reraise`, and `in` in a guard are not swapped.
 
   In a module body, outside its definitions, no call is swapped and only a

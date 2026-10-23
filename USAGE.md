@@ -258,6 +258,8 @@ results:
 - The name of a module attribute being set (`timeout` in `@timeout 5_000`); the
   value is still mutated
 - The modifiers of a sigil (the `i` in `~r/ab+c/i`); the text is still mutated
+- The removal of an operand of `<>`, which leaves `nil <> "x"`; the operands are
+  still mutated
 - The function name of a remote call or capture (`join` in `Enum.join(list, ",")`);
   the module and arguments are still mutated
 - In a module body outside its definitions, which runs at compile time, argument

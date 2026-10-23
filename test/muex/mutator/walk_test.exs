@@ -506,6 +506,32 @@ defmodule Muex.Mutator.WalkTest do
     end
   end
 
+  describe "`<>`" do
+    @concats """
+    defmodule Muex.WalkTest.Concats do
+      @prefix "p" <> String.upcase("q")
+      def run(x), do: {@prefix, String.upcase(x) <> "y", "p" <> String.downcase(x) <> x}
+    end
+    """
+
+    test "no mutant of a `<>` fails to compile" do
+      assert invalid_mutants(@concats, Muex.Config.all_mutators()) == []
+    end
+
+    test "a `<>` is still removed and swapped, and its operands still mutated" do
+      mutations = @concats |> ast!() |> Mutator.walk([FunctionCall, Literal], %{file: "s.ex"})
+
+      changed =
+        for %{ast: ast, original_ast: original} <- mutations,
+            do: {Macro.to_string(original), ast && Macro.to_string(ast)}
+
+      assert {"String.upcase(x) <> \"y\"", nil} in changed
+      assert {"String.upcase(x) <> \"y\"", "\"y\" <> String.upcase(x)"} in changed
+      assert {"\"y\"", "\"\""} in changed
+      refute {"String.upcase(x)", nil} in changed
+    end
+  end
+
   describe "module bodies" do
     @module_body """
     defmodule Muex.WalkTest.ModuleBody do
