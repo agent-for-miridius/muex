@@ -14,10 +14,12 @@ defmodule Muex.Mutator.FunctionCall do
   guard, nor `nil <> "x"`. The arguments of a
   sigil, `raise`, `reraise`, and `in` in a guard are not swapped.
 
-  In a module body, outside its definitions, no call is swapped and only a
-  statement of the body is removed: that code runs when the module compiles.
-  Nor is an attribute definition the module reads at compile time, in a
-  definition's head or in the module body.
+  In a module body, outside its definitions, no call is swapped, and only an
+  attribute definition or the body's last statement is removed: that code
+  runs when the module compiles, and `Muex.Mutator.StatementDeletion` deletes
+  the other statements. Nor is a statement removed that defines what the
+  module reads at compile time, such as an attribute read in a definition's
+  head or in the module body.
   """
   @behaviour Muex.Mutator
 
@@ -117,20 +119,24 @@ defmodule Muex.Mutator.FunctionCall do
   defp removal(_ast, _description, %{irreplaceable: true}, _line), do: []
 
   # A module body runs when the module compiles, so a call whose value it uses
-  # cannot become `nil` (`defstruct nil`, `for f <- nil`).
-  defp removal(_ast, _description, %{module_body: _} = context, _line)
-       when not is_map_key(context, :statement), do: []
-
-  # Nor can a statement defining what the module reads at compile time
-  # (`@limits` in `x in @limits` in a guard).
-  defp removal(ast, description, %{module_body: statements} = context, line) do
-    if References.still_referenced?(ast, List.delete(statements, ast)),
-      do: [],
-      else: [build_mutation(nil, description, context, line)]
+  # cannot become `nil` (`defstruct nil`, `for f <- nil`). Of its statements,
+  # StatementDeletion deletes all but attribute definitions and the last one;
+  # those are removed here, unless they define what the module reads at
+  # compile time (`@limits` in `x in @limits` in a guard).
+  defp removal(ast, description, %{module_body: statements, statement: true} = context, line) do
+    if (attribute_definition?(ast) or ast == List.last(statements)) and
+         not References.still_referenced?(ast, List.delete(statements, ast)),
+       do: [build_mutation(nil, description, context, line)],
+       else: []
   end
+
+  defp removal(_ast, _description, %{module_body: _}, _line), do: []
 
   defp removal(_ast, description, context, line),
     do: [build_mutation(nil, description, context, line)]
+
+  defp attribute_definition?({:@, _meta, [{_name, _attribute_meta, [_value]}]}), do: true
+  defp attribute_definition?(_ast), do: false
 
   # Swap a call's first two arguments.
   # In a module body a swap mostly raises when the module compiles

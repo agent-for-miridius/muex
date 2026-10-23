@@ -4,7 +4,8 @@ defmodule Muex.Mutator.StatementDeletion do
 
   Targets `__block__` nodes with two or more statements. For each
   non-final statement, produces a mutation that deletes it from the block.
-  The final statement (the return value) is left to the ReturnValue mutator.
+  The final statement (the return value) is left to the ReturnValue mutator,
+  or in a module body to `Muex.Mutator.FunctionCall`.
 
   This is one of the highest-value mutation operators: if deleting a
   statement doesn't cause any test to fail, that statement is either

@@ -554,14 +554,15 @@ defmodule Muex.Mutator.WalkTest do
       assert invalid_mutants(@module_body, [FunctionCall]) == []
     end
 
-    test "a module body's statements are still removed, and calls in a definition still swapped and removed" do
+    test "a module body's attribute definitions are still removed, and calls in a definition still swapped and removed" do
       mutations = @module_body |> ast!() |> Mutator.walk([FunctionCall], %{file: "s.ex"})
 
       changed =
         for %{ast: ast, original_ast: original} <- mutations,
             do: {Macro.to_string(original), ast && Macro.to_string(ast)}
 
-      assert {"Module.register_attribute(__MODULE__, :acc, accumulate: true)", nil} in changed
+      assert {"@acc max(1, 2)", nil} in changed
+      refute {"Module.register_attribute(__MODULE__, :acc, accumulate: true)", nil} in changed
       assert {"Enum.join(xs, \",\")", "Enum.join(\",\", xs)"} in changed
       assert {"div(7, 2)", "div(2, 7)"} in changed
       assert {"div(7, 2)", nil} in changed
@@ -613,6 +614,32 @@ defmodule Muex.Mutator.WalkTest do
       def run, do: @runtime
     end
     """
+
+    test "each module-body statement is removed by one mutator only" do
+      source = """
+      defmodule Muex.WalkTest.Once do
+        @limit 1
+        Module.register_attribute(__MODULE__, :acc, accumulate: true)
+        def run, do: :ok
+        Module.register_attribute(__MODULE__, :last, accumulate: true)
+      end
+      """
+
+      mutations =
+        source |> ast!() |> Mutator.walk([FunctionCall, StatementDeletion], %{file: "s.ex"})
+
+      removed =
+        for %{mutator: mutator, location: %{line: line}} = m <- mutations,
+            mutator == StatementDeletion or m.ast == nil,
+            do: {line, mutator}
+
+      assert Enum.sort(removed) == [
+               {2, FunctionCall},
+               {3, StatementDeletion},
+               {4, StatementDeletion},
+               {5, FunctionCall}
+             ]
+    end
 
     test "no mutant removing an accumulating attribute's registration fails to compile" do
       assert invalid_mutants(@accumulated, [FunctionCall, StatementDeletion]) == []
