@@ -608,7 +608,8 @@ defmodule Muex.Mutator.WalkTest do
     defmodule Muex.WalkTest.RemoteCalls do
       Module.register_attribute(__MODULE__, :acc, accumulate: true)
       @joined Enum.join(["a", "b"], ",")
-      def run(m, x), do: {@joined, m.key, :erlang.atom_to_binary(x), Enum.map([x], &String.upcase/1)}
+      @bin :erlang.atom_to_binary(:ok)
+      def run(m, x), do: {@joined, @bin, m.key, :erlang.atom_to_binary(x), Enum.map([x], &String.upcase/1)}
     end
     """
 
@@ -622,6 +623,13 @@ defmodule Muex.Mutator.WalkTest do
       assert :key in originals
       assert :erlang in originals
       assert :acc in originals
+    end
+
+    test "an Erlang module is offered in a function but not in the module body" do
+      mutations = @remote_calls |> ast!() |> Mutator.walk([Literal], %{file: "s.ex"})
+      lines = for %{original_ast: :erlang, location: %{line: line}} <- mutations, do: line
+
+      assert lines == [5]
     end
 
     test "no Literal mutant of a remote call fails to compile" do

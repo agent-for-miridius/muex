@@ -264,7 +264,8 @@ results:
   the module and arguments are still mutated
 - In a module body outside its definitions, which runs at compile time, argument
   swaps and the removal of anything but a whole statement, and the removal of an
-  attribute definition that a guard, pattern or the module body reads
+  attribute definition that a guard, pattern or the module body reads, and the
+  Erlang module of a remote call (`:erlang` in `:erlang.atom_to_binary(:ok)`)
 
 This pruning is always on and requires no configuration. Literals inside function
 bodies still receive an accurate source line, so survived and suspicious mutants

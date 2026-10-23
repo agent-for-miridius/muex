@@ -212,6 +212,8 @@ defmodule Muex.Mutator do
       `Enum.join(list, ",")`), as a local call's name is not: renamed, it
       names a function that does not exist. The module and arguments are
       traversed, and so is the field of a map field access (`m.key`).
+    * In a module body, the Erlang module of a remote call (`:erlang` in
+      `:erlang.atom_to_binary(:ok)`), for the same reason.
 
   Inside a pattern the walk sets `context[:pattern]` to `true`, so a mutator
   can leave alone what is only valid as an expression. Patterns are a
@@ -586,7 +588,7 @@ defmodule Muex.Mutator do
         dot_context = update_line(context, dot)
 
         mutate_node(dot, mutators, dot_context, below(path, [0])) ++
-          collect(module, mutators, dot_context, skip_calls, below(path, [0, 2, 0]))
+          collect_module(module, mutators, dot_context, skip_calls, below(path, [0, 2, 0]))
       end
 
     dot_mutations ++ collect_args(args, mutators, context, skip_calls, below(path, [2]))
@@ -615,6 +617,17 @@ defmodule Muex.Mutator do
   end
 
   defp collect_children(_leaf, _mutators, _context, _skip_calls, _path), do: []
+
+  # A remote call's module. An Erlang module renamed (`:erlang` to
+  # `:mutated_atom`) names a module that does not exist, which fails to
+  # compile when the module body calls it; in a function it raises when
+  # called, so there it is still offered.
+  defp collect_module(module, _mutators, %{module_body: _}, _skip_calls, _path)
+       when is_atom(module),
+       do: []
+
+  defp collect_module(module, mutators, context, skip_calls, path),
+    do: collect(module, mutators, context, skip_calls, path)
 
   # Args may be a list (normal call) or an atom such as `nil`/`Elixir` for
   # variables and zero-arity forms, which carry no child nodes. `path` is the
