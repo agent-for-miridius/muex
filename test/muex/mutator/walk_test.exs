@@ -47,8 +47,8 @@ defmodule Muex.Mutator.WalkTest do
   defp follow(list, [index | rest]) when is_list(list), do: follow(Enum.at(list, index), rest)
 
   # Every mutant of `source` under `mutators` that does not compile, as
-  # `{description, line, error}`. `source` must define one module, with a name
-  # no other test compiles.
+  # `{description, line, error}`. `source` must define modules with names no
+  # other test compiles.
   defp invalid_mutants(source, mutators) do
     ast = ast!(source)
     entry = %{ast: ast, path: "s.ex"}
@@ -685,6 +685,55 @@ defmodule Muex.Mutator.WalkTest do
 
       assert 3 in deleted
       refute 2 in deleted
+    end
+  end
+
+  describe "macro bodies" do
+    @macros """
+    defmodule Muex.WalkTest.Macros do
+      defmacro fetch(opts) do
+        key = Keyword.fetch!(opts, :key)
+
+        quote bind_quoted: [key: key, other: Keyword.get(opts, :other, 3)] do
+          {key, other, Map.get(%{a: 1}, :a, 0)}
+        end
+      end
+
+      defmacro named(name) do
+        quote do
+          def unquote(String.to_atom(name))(), do: Enum.join(["a", "b"], ",")
+        end
+      end
+    end
+
+    defmodule Muex.WalkTest.MacroCaller do
+      require Muex.WalkTest.Macros
+      Muex.WalkTest.Macros.named("foo")
+      def run, do: Muex.WalkTest.Macros.fetch(key: 1)
+    end
+    """
+
+    test "no mutant of a macro body breaks a caller" do
+      assert invalid_mutants(@macros, [FunctionCall, Literal]) == []
+    end
+
+    test "the code a macro quotes is still mutated, apart from what it unquotes" do
+      mutations = @macros |> ast!() |> Mutator.walk([FunctionCall, Literal], %{file: "s.ex"})
+
+      changed =
+        for %{ast: ast, original_ast: original, location: %{line: line}} <- mutations,
+            line in 2..16,
+            do: {Macro.to_string(original), ast && Macro.to_string(ast)}
+
+      assert {"Map.get(%{a: 1}, :a, 0)", "Map.get(:a, %{a: 1}, 0)"} in changed
+      assert {":a", ":mutated_atom"} in changed
+      assert {"Enum.join([\"a\", \"b\"], \",\")", "Enum.join(\",\", [\"a\", \"b\"])"} in changed
+      refute {"Keyword.fetch!(opts, :key)", "Keyword.fetch!(:key, opts)"} in changed
+      refute {"Keyword.fetch!(opts, :key)", nil} in changed
+      refute {":key", ":mutated_atom"} in changed
+      refute {":other", ":mutated_atom"} in changed
+      refute {"name", nil} in changed
+      refute {"String.to_atom(name)", nil} in changed
     end
   end
 

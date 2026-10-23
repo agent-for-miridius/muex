@@ -248,7 +248,11 @@ defmodule Muex.Mutator do
 
   A module body runs when the module compiles. Outside its definitions the
   walk sets `context[:module_body]` to the body's statements, and also sets
-  `context[:statement]` to `true` on each of those statements.
+  `context[:statement]` to `true` on each of those statements. A macro's body
+  (`defmacro`, `defmacrop`) runs when a caller compiles, and is walked the
+  same way, except the code it quotes: the `do` of a `quote` runs where the
+  macro is called and is walked as a function body is, apart from what it
+  unquotes.
 
   Callers can prune additional framework DSL calls by passing a list of
   call names (atoms) in `context[:skip_calls]`. For example,
@@ -307,6 +311,7 @@ defmodule Muex.Mutator do
         |> enter_capture(node)
         |> enter_struct(node)
         |> enter_module(node, path)
+        |> enter_quote(node)
 
       mutations ++ collect_children(node, mutators, children_context, skip_calls, path)
     end
@@ -330,10 +335,39 @@ defmodule Muex.Mutator do
 
   # A mutant that makes the module body raise does not compile.
   # `statement_paths` lets `update_statement` mark the body's own statements.
-  # A definition drops both keys: its body runs when called.
-  defp enter_module(context, {:defmodule, _meta, [_name, [{:do, body}]]}, path) do
-    body_path = below(path, [2, 1, 0, 1])
+  # A definition drops both keys: its body runs when called. A macro's body
+  # sets them again; see `enter_macro/4`.
+  defp enter_module(context, {:defmodule, _meta, [_name, [{:do, body}]]}, path),
+    do: enter_body(context, body, below(path, [2, 1, 0, 1]))
 
+  defp enter_module(context, _node, _path), do: context
+
+  # A macro's body runs when a caller compiles, so a mutant that makes it
+  # raise there breaks the caller: it is walked as a module body is.
+  # `macro_body` stays set for the whole macro, for `enter_quote/2`.
+  defp enter_macro(context, kind, [[{:do, body} | _]], path)
+       when kind in [:defmacro, :defmacrop] do
+    context = enter_body(context, body, below(path, [2, 1, 0, 1]))
+    Map.put(context, :macro_body, context.module_body)
+  end
+
+  defp enter_macro(context, _kind, _rest, _path), do: context
+
+  # In a macro, what `quote` quotes runs where the macro is called, as a
+  # function body does, so the `do` of a `quote` is walked without
+  # `module_body`; see the keyword pair clause of `collect_children/5`. Its
+  # options (`bind_quoted:`) and what it unquotes run when the macro
+  # expands, and are walked as the macro's body.
+  defp enter_quote(%{macro_body: _} = context, {:quote, _meta, args}) when is_list(args),
+    do: Map.put(context, :quoting, true)
+
+  defp enter_quote(%{macro_body: statements} = context, {form, _meta, [_expr]})
+       when form in [:unquote, :unquote_splicing] and not is_map_key(context, :module_body),
+       do: Map.put(context, :module_body, statements)
+
+  defp enter_quote(context, _node), do: context
+
+  defp enter_body(context, body, body_path) do
     {statements, paths} =
       case body do
         {:__block__, _block_meta, statements} ->
@@ -349,8 +383,6 @@ defmodule Muex.Mutator do
 
     Map.merge(context, %{module_body: statements, statement_paths: MapSet.new(paths)})
   end
-
-  defp enter_module(context, _node, _path), do: context
 
   defp update_statement(%{statement_paths: paths} = context, path) do
     if MapSet.member?(paths, path), do: Map.put(context, :statement, true), else: context
@@ -477,16 +509,17 @@ defmodule Muex.Mutator do
 
   # Definition: `def name(params) when guard`. The head is not a call, so no
   # mutator is offered it; see `collect_head/5`. The body and options are
-  # walked as usual.
+  # walked as usual, a macro's body as a module body; see `enter_macro/4`.
   defp collect_children({kind, _meta, [head | rest]}, mutators, context, skip_calls, path)
        when kind in @definitions do
     context = Map.drop(context, [:module_body, :statement_paths])
+    body_context = enter_macro(context, kind, rest, path)
 
     collect_head(head, mutators, context, skip_calls, below(path, [2, 0])) ++
       (rest
        |> Enum.with_index(1)
        |> Enum.flat_map(fn {node, index} ->
-         collect(node, mutators, context, skip_calls, below(path, [2, index]))
+         collect(node, mutators, body_context, skip_calls, below(path, [2, index]))
        end))
   end
 
@@ -634,10 +667,17 @@ defmodule Muex.Mutator do
   # Two-element tuple: a keyword pair or literal pair. Never mutate an atom
   # key; traverse the value, unless it is the literal value of a module-body
   # call's option (see `collect_call_args/5`), which consumes the flag. In a
-  # struct definition the value is a default, not field names.
+  # struct definition the value is a default, not field names. The `do` of a
+  # `quote` in a macro is walked as a function body; see `enter_quote/2`.
   defp collect_children({left, right}, mutators, context, skip_calls, path) do
     {options?, context} = Map.pop(context, :options, false)
+    {quoting?, context} = Map.pop(context, :quoting, false)
     context = Map.delete(context, :fields)
+
+    context =
+      if quoting? and left == :do,
+        do: Map.drop(context, [:module_body, :statement_paths]),
+        else: context
 
     left_mutations =
       if is_atom(left),

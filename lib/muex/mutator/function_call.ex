@@ -14,9 +14,10 @@ defmodule Muex.Mutator.FunctionCall do
   guard, nor `nil <> "x"`. The arguments of a
   sigil, `raise`, `reraise`, and `in` in a guard are not swapped.
 
-  In a module body, outside its definitions, no call is swapped, and only an
-  attribute definition or the body's last statement is removed: that code
-  runs when the module compiles, and `Muex.Mutator.StatementDeletion` deletes
+  In a module body, outside its definitions, and in a macro's body outside
+  the code it quotes (see `Muex.Mutator.walk/3`), no call is swapped, and
+  only an attribute definition or the body's last statement is removed: that
+  code runs at compile time, and `Muex.Mutator.StatementDeletion` deletes
   the other statements. Nor is a statement removed that defines what the
   module reads at compile time, such as an attribute read in a definition's
   head or in the module body, or a `defexception`, which other modules may

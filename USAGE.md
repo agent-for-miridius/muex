@@ -267,7 +267,8 @@ results:
 - The deletion of a `defstruct`, a `defexception`, a public `defmacro` clause, or
   a `defmodule` that defines one, which other files, tests included, may use
   when they compile
-- In a module body outside its definitions, which runs at compile time, argument
+- In a module body outside its definitions, which runs at compile time, and in
+  a macro's body outside the code it quotes, which runs when a caller compiles, argument
   swaps, FunctionCall's removal of anything but an attribute definition or the
   last statement (other statements are left to StatementDeletion), the removal
   of an attribute definition that a guard, pattern or the module body reads,
