@@ -26,9 +26,10 @@ defmodule Muex.Mutator.StatementDeletion do
 
   Deleting the last clause of a function, macro or guard that the rest of
   the module calls or captures, or a `defstruct` while the module builds or
-  matches a struct, leaves code that does not compile. Those deletions are
-  skipped. Deleting one clause of several, or a definition nothing else in
-  the module uses, is kept.
+  matches a struct, or a `Module.register_attribute/3` whose attribute the
+  module reads at compile time, leaves code that does not compile. Those
+  deletions are skipped. Deleting one clause of several, or a definition
+  nothing else in the module uses, is kept.
 
   ## Bindings a later statement reads are not deleted
 

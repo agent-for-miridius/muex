@@ -43,6 +43,16 @@ defmodule Muex.Mutator.References do
   defp defined_by({:@, _meta, [{name, _attribute_meta, [_value]}]}) when is_atom(name),
     do: {:attribute, name}
 
+  # `Module.register_attribute(__MODULE__, :acc, accumulate: true)`: without
+  # it `@acc` holds only its last value, not the list that code reading it
+  # expects (`defstruct [:a] ++ @acc`).
+  defp defined_by(
+         {{:., _dot_meta, [{:__aliases__, _alias_meta, [:Module]}, :register_attribute]}, _meta,
+          [{:__MODULE__, _module_meta, context}, name, _options]}
+       )
+       when is_atom(context) and is_atom(name),
+       do: {:attribute, name}
+
   defp defined_by(_stmt), do: nil
 
   defp arities_defined(stmt, name) do

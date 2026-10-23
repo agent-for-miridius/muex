@@ -5,6 +5,7 @@ defmodule Muex.Mutator.WalkTest do
   alias Muex.Mutator.Arithmetic
   alias Muex.Mutator.FunctionCall
   alias Muex.Mutator.Literal
+  alias Muex.Mutator.StatementDeletion
 
   # A minimal mutator that records the enclosing line supplied by the
   # traversal in `context[:line]`. Used to assert line propagation
@@ -600,6 +601,31 @@ defmodule Muex.Mutator.WalkTest do
             do: Macro.to_string(original)
 
       assert removed == ["@runtime 5"]
+    end
+
+    @accumulated """
+    defmodule Muex.WalkTest.Accumulated do
+      Module.register_attribute(__MODULE__, :acc, accumulate: true)
+      Module.register_attribute(__MODULE__, :runtime, accumulate: true)
+      @acc :a
+      @runtime 1
+      defstruct [:z] ++ @acc
+      def run, do: @runtime
+    end
+    """
+
+    test "no mutant removing an accumulating attribute's registration fails to compile" do
+      assert invalid_mutants(@accumulated, [FunctionCall, StatementDeletion]) == []
+    end
+
+    test "a registration read only in a function body is still deleted" do
+      mutations =
+        @accumulated |> ast!() |> Mutator.walk([FunctionCall, StatementDeletion], %{file: "s.ex"})
+
+      deleted = for %{mutator: StatementDeletion, location: %{line: line}} <- mutations, do: line
+
+      assert 3 in deleted
+      refute 2 in deleted
     end
   end
 
