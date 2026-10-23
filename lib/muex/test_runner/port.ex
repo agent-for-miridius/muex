@@ -193,6 +193,13 @@ defmodule Muex.TestRunner.Port do
         output = acc |> String.replace([@suite_started, @suite_finished], "")
         {:ok, String.replace_invalid(output), exit_code}
 
+      # A worker traps exits so that the worker pool, stopping, can have it kill
+      # its `mix test` before the sandbox under it is removed.
+      {:EXIT, from, reason} when is_pid(from) and reason != :normal ->
+        kill_os_process(port)
+        safe_close(port)
+        exit(reason)
+
       _msg ->
         collect_output(port, acc, timeouts, deadline)
     after

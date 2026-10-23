@@ -136,11 +136,12 @@ defmodule Muex.WorkerPoolTest do
     @tag :tmp_dir
     test "stops a running mutant's `mix test` before removing the sandboxes",
          %{tmp_dir: tmp_dir} do
-      # The mutant's test writes its OS pid here, and blocks until it is read.
-      fifo = Path.join(tmp_dir, "started")
-      {_, 0} = System.cmd("mkfifo", [fifo])
+      # The mutant's test sends its OS pid here, then hangs. (Not a FIFO: while
+      # File.read!/1 waits on one, the pool never builds its sandbox.)
+      {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
+      {:ok, port} = :inet.port(listener)
       project = Path.join(tmp_dir, "project")
-      write_hanging_project!(project, fifo)
+      write_hanging_project!(project, port)
 
       {:ok, pool} = GenServer.start(WorkerPool, max_workers: 1)
       {:ok, ast} = Code.string_to_quoted(File.read!(Path.join(project, "lib/hang.ex")))
@@ -162,7 +163,8 @@ defmodule Muex.WorkerPoolTest do
         )
       end)
 
-      os_pid = File.read!(fifo)
+      {:ok, socket} = :gen_tcp.accept(listener, 50_000)
+      {:ok, os_pid} = :gen_tcp.recv(socket, 0, 5_000)
       on_exit(fn -> System.cmd("kill", ["-9", os_pid], stderr_to_stdout: true) end)
       [%{base: base} | _] = :sys.get_state(pool).sandboxes
 
@@ -173,7 +175,7 @@ defmodule Muex.WorkerPoolTest do
     end
   end
 
-  defp write_hanging_project!(project, fifo) do
+  defp write_hanging_project!(project, port) do
     files = %{
       "mix.exs" => """
       defmodule Hang.MixProject do
@@ -183,14 +185,15 @@ defmodule Muex.WorkerPoolTest do
       """,
       "lib/hang.ex" => "defmodule Hang do\n  def one, do: 1\nend\n",
       "test/test_helper.exs" => "ExUnit.start()\n",
-      # Passes unmutated, so the baseline runs; a mutant hangs.
+      # Passes unmutated; a mutant hangs.
       "test/hang_test.exs" => """
       defmodule HangTest do
         use ExUnit.Case
 
         test "one" do
           if Hang.one() != 1 do
-            File.write!(#{inspect(fifo)}, System.pid())
+            {:ok, socket} = :gen_tcp.connect({127, 0, 0, 1}, #{port}, [:binary])
+            :ok = :gen_tcp.send(socket, System.pid())
             Process.sleep(:infinity)
           end
         end

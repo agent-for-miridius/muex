@@ -58,7 +58,7 @@ defmodule Muex.WorkerPool do
       test_paths: ["test"],
       # Map of file_path => :queue.queue(mutation)
       pending_by_file: %{},
-      # Map of worker_ref => {mutation, file_path, sandbox_idx, monitor_ref}
+      # Map of worker_ref => {mutation, file_path, sandbox_idx, monitor_ref, pid}
       active_workers: %{},
       # Reverse map: monitor_ref => worker_ref (for :DOWN lookup)
       monitor_to_worker: %{},
@@ -348,7 +348,7 @@ defmodule Muex.WorkerPool do
       {nil, _} ->
         {:noreply, state}
 
-      {{_mutation, file_path, sandbox_idx, monitor_ref}, new_active} ->
+      {{_mutation, file_path, sandbox_idx, monitor_ref, _pid}, new_active} ->
         # Demonitor so we don't get a spurious :DOWN for normal exit
         Process.demonitor(monitor_ref, [:flush])
 
@@ -383,7 +383,7 @@ defmodule Muex.WorkerPool do
         {:noreply, %{state | monitor_to_worker: new_monitor_map}}
 
       {:ok, worker_ref} ->
-        {mutation, file_path, sandbox_idx, ^monitor_ref} =
+        {mutation, file_path, sandbox_idx, ^monitor_ref, _pid} =
           Map.fetch!(state.active_workers, worker_ref)
 
         # Worker crashed — synthesize a failed result
@@ -457,6 +457,10 @@ defmodule Muex.WorkerPool do
 
           pid =
             spawn(fn ->
+              # So the pool, stopping, can have it stop its `mix test` first
+              # (see terminate/2).
+              Process.flag(:trap_exit, true)
+
               result =
                 run_mutation_worker(
                   mutation,
@@ -477,7 +481,7 @@ defmodule Muex.WorkerPool do
                 Map.put(
                   state.active_workers,
                   worker_ref,
-                  {mutation, file_path, sandbox_idx, monitor_ref}
+                  {mutation, file_path, sandbox_idx, monitor_ref, pid}
                 ),
               monitor_to_worker: Map.put(state.monitor_to_worker, monitor_ref, worker_ref),
               available_sandboxes: new_available
@@ -854,10 +858,42 @@ defmodule Muex.WorkerPool do
 
   @impl true
   def terminate(_reason, state) do
+    stop_workers(state.active_workers)
+
     if state.sandboxes != [] do
       Sandbox.cleanup(state.sandboxes)
     end
 
     :ok
+  end
+
+  @worker_shutdown_ms 5_000
+
+  # A running `mix test` would outlive the pool and write its build back into
+  # the sandbox removed after this. Each worker traps exits, so told to shut
+  # down it kills its `mix test` and returns (see Muex.TestRunner.Port). One
+  # that has not stopped within @worker_shutdown_ms is killed outright, so a
+  # stuck worker cannot hang the pool's exit.
+  defp stop_workers(active_workers) do
+    workers = Map.values(active_workers)
+    Enum.each(workers, fn {_, _, _, _monitor_ref, pid} -> Process.exit(pid, :shutdown) end)
+    deadline = System.monotonic_time(:millisecond) + @worker_shutdown_ms
+
+    Enum.each(workers, fn {_, _, _, monitor_ref, pid} ->
+      await_down(monitor_ref, pid, deadline)
+    end)
+  end
+
+  defp await_down(monitor_ref, pid, deadline) do
+    receive do
+      {:DOWN, ^monitor_ref, :process, _pid, _reason} -> :ok
+    after
+      max(deadline - System.monotonic_time(:millisecond), 0) ->
+        Process.exit(pid, :kill)
+
+        receive do
+          {:DOWN, ^monitor_ref, :process, _pid, _reason} -> :ok
+        end
+    end
   end
 end
