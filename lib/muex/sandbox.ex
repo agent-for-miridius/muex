@@ -51,6 +51,9 @@ defmodule Muex.Sandbox do
   Creates a pool of reusable sandbox directories.
 
   Returns a list of sandbox structs that can be checked out by workers.
+
+  First removes from the temp dir the pools and `mix test` runner scripts of
+  muex processes that are no longer running.
   """
   @spec create_pool(non_neg_integer(), keyword()) :: [sandbox()]
   def create_pool(count, opts \\ []) do
@@ -60,10 +63,12 @@ defmodule Muex.Sandbox do
     mirror = Keyword.get(opts, :mirror, [])
 
     unique = System.unique_integer([:positive, :monotonic])
+    tmp_dir = System.tmp_dir!()
+    remove_stale_temp_entries(tmp_dir)
 
     base_dir =
       Path.join(
-        System.tmp_dir!(),
+        tmp_dir,
         "muex_sandboxes_#{System.pid()}_#{System.system_time(:millisecond)}_#{unique}"
       )
 
@@ -78,6 +83,44 @@ defmodule Muex.Sandbox do
       e ->
         File.rm_rf(base_dir)
         reraise e, __STACKTRACE__
+    end
+  end
+
+  # A muex that was killed never removed its pools and runner scripts (see
+  # Muex.TestRunner.Port). Each name holds the OS pid of the muex that made it,
+  # so remove those whose process is gone. A name with no pid is left alone.
+  @stale_temp_entry ~r/^muex_(?|sandboxes_(\d+)_\d+_\d+|mix_test_(\d+)_\d+\.exs)$/
+
+  defp remove_stale_temp_entries(tmp_dir) do
+    with {:ok, names} <- File.ls(tmp_dir),
+         owners when owners != [] <- stale_candidates(names),
+         {:ok, live} <- live_pids(owners |> Enum.map(&elem(&1, 1)) |> Enum.uniq()) do
+      for {name, pid} <- owners, pid not in live, do: File.rm_rf(Path.join(tmp_dir, name))
+    end
+
+    :ok
+  end
+
+  defp stale_candidates(names) do
+    for name <- names,
+        [pid] <- [Regex.run(@stale_temp_entry, name, capture: :all_but_first)],
+        pid != System.pid(),
+        do: {name, pid}
+  end
+
+  # `ps -p`, unlike `kill -0`, also sees another user's processes. It exits 1
+  # both when none of them is running and on an error (macOS refuses the whole
+  # list over one pid out of range), so only output that is all pids counts.
+  # Without a usable answer nothing is removed.
+  defp live_pids(pids) do
+    with ps when is_binary(ps) <- System.find_executable("ps"),
+         {output, status} when status in [0, 1] <-
+           System.cmd(ps, ["-o", "pid=", "-p", Enum.join(pids, ",")], stderr_to_stdout: true),
+         live = String.split(output),
+         true <- Enum.all?(live, &(&1 =~ ~r/^\d+$/)) do
+      {:ok, live}
+    else
+      _ -> :error
     end
   end
 
@@ -569,8 +612,13 @@ defmodule Muex.Sandbox do
 
   # -- Private helpers --
 
+  # The version manager's files too: the sandbox sits in the temp dir, where a
+  # shim (`elixir` from mise or asdf, say) would otherwise pick another version
+  # of Elixir or Erlang than the project pins.
+  @version_files ~w(.tool-versions mise.toml .mise.toml mise.local.toml .mise.local.toml)
+
   defp symlink_top_level(root, project_root, mirror) do
-    top_level_files = ~w(mix.exs mix.lock .formatter.exs .credo.exs)
+    top_level_files = ~w(mix.exs mix.lock .formatter.exs .credo.exs) ++ @version_files
 
     for file <- top_level_files do
       source = Path.join(project_root, file)
@@ -580,7 +628,7 @@ defmodule Muex.Sandbox do
       end
     end
 
-    for dir <- ~w(config priv) ++ mirror do
+    for dir <- ~w(config priv .mise) ++ mirror do
       source = Path.join(project_root, dir)
 
       if File.dir?(source) do

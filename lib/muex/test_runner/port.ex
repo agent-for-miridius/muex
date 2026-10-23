@@ -108,9 +108,14 @@ defmodule Muex.TestRunner.Port do
   Mix.CLI.main()
   """
 
+  # The name holds this VM's OS pid, so a script a killed muex left behind is
+  # recognised as stale and removed (see Muex.Sandbox.create_pool/2).
   defp spawn_test_port(test_files, mix_env, timeouts, cd, no_compile, exclude_flags) do
     script =
-      Path.join(System.tmp_dir!(), "muex_mix_test_#{System.unique_integer([:positive])}.exs")
+      Path.join(
+        System.tmp_dir!(),
+        "muex_mix_test_#{System.pid()}_#{System.unique_integer([:positive])}.exs"
+      )
 
     File.write!(script, @runner_script)
 

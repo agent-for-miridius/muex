@@ -211,6 +211,47 @@ defmodule Muex.SandboxTest do
     end
   end
 
+  describe "create_pool/2 stale temp entries" do
+    @describetag :tmp_dir
+
+    # A muex that is killed leaves its pool and runner scripts in the temp dir.
+    test "removes those of muex processes that are gone, and nothing else", %{tmp_dir: tmp_dir} do
+      {dead, 0} = System.cmd("sh", ["-c", "echo $$"])
+      dead = String.trim(dead)
+
+      stale = ["muex_sandboxes_#{dead}_1792745071239_1", "muex_mix_test_#{dead}_5.exs"]
+
+      kept = [
+        # this VM's, and a running process's (pid 1 always runs)
+        "muex_sandboxes_#{System.pid()}_1792745071239_1",
+        "muex_mix_test_1_5.exs",
+        # names with no pid in them
+        "muex_mix_test_5.exs",
+        "muex_custom_mutators_5"
+      ]
+
+      for name <- stale ++ kept do
+        if String.ends_with?(name, ".exs"),
+          do: File.write!(Path.join(tmp_dir, name), ""),
+          else: File.mkdir_p!(Path.join([tmp_dir, name, "worker_1"]))
+      end
+
+      # No other test runs beside this module's (not async).
+      previous = System.get_env("TMPDIR")
+      System.put_env("TMPDIR", tmp_dir)
+
+      on_exit(fn ->
+        if previous, do: System.put_env("TMPDIR", previous), else: System.delete_env("TMPDIR")
+      end)
+
+      Sandbox.cleanup(Sandbox.create_pool(1, project_root: @project_root, test_paths: ["test"]))
+
+      # Mix's own lock files land here too.
+      left = tmp_dir |> File.ls!() |> Enum.filter(&String.starts_with?(&1, "muex_"))
+      assert Enum.sort(left) == Enum.sort(kept)
+    end
+  end
+
   describe "cleanup/1" do
     test "removes all sandbox directories" do
       sandboxes = Sandbox.create_pool(2, project_root: @project_root, test_paths: ["test"])
@@ -550,6 +591,21 @@ defmodule Muex.SandboxTest do
       assert :ok = Sandbox.restore(sandbox, "connector/client.ex")
       assert File.read!(sandbox_path) == original
       assert File.read!(project_path) == original
+    end
+
+    # In the temp dir a version manager's shim would otherwise ignore the pin.
+    test "the project's version manager files are linked", %{tmp_dir: tmp_dir} do
+      project_root = build_mirror_project(tmp_dir)
+      files = ~w(.tool-versions mise.toml .mise.toml mise.local.toml .mise.local.toml)
+      for file <- files, do: File.write!(Path.join(project_root, file), "")
+      File.mkdir_p!(Path.join(project_root, ".mise/tasks"))
+
+      sandbox = Sandbox.create_sandbox(Path.join(tmp_dir, "sandbox"), project_root, "test", [])
+
+      for entry <- [".mise" | files] do
+        assert File.read_link(Path.join(sandbox.root, entry)) ==
+                 {:ok, Path.join(project_root, entry)}
+      end
     end
   end
 
