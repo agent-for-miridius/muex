@@ -34,7 +34,8 @@ defmodule Muex.MixBootstrap do
   @typedoc """
   Why the project could not be loaded.
 
-    * `:no_mix` - Mix could not be found next to the `elixir` on `PATH`.
+    * `:no_mix` - Mix could not be found in the Elixir installation of the
+      `elixir` on `PATH`.
     * `:no_project` - no `mix.exs` was found at or above the working directory.
     * `:load_failed` - `mix.exs` raised while it was evaluated.
   """
@@ -142,9 +143,9 @@ defmodule Muex.MixBootstrap do
     end
   end
 
-  # The Elixir installation is the one that owns the `elixir` executable on
-  # PATH: `<elixir>/bin/elixir` sits beside `<elixir>/lib/mix/ebin`. The escript
-  # itself runs from an embedded Elixir, so `:code.lib_dir/1` cannot answer.
+  # The Elixir installation is the one the `elixir` executable on PATH runs. The
+  # escript itself runs from an embedded Elixir, so its own `:code.lib_dir/1`
+  # cannot answer.
   defp start_mix do
     case elixir_lib_dir() do
       nil ->
@@ -166,13 +167,25 @@ defmodule Muex.MixBootstrap do
 
   defp elixir_lib_dir do
     case System.find_executable("elixir") do
-      nil ->
-        nil
-
-      elixir ->
-        lib_dir = elixir |> Path.dirname() |> Path.join("..") |> Path.join("lib") |> Path.expand()
-        if File.dir?(lib_dir), do: lib_dir
+      nil -> nil
+      elixir -> reported_lib_dir(elixir) || sibling_lib_dir(elixir)
     end
+  end
+
+  # A version manager's shim (mise, asdf) or a symlink such as Homebrew's
+  # `/opt/homebrew/bin/elixir` stands on PATH with no Elixir `lib` beside it, so
+  # the `elixir` it runs is asked where its `lib` is.
+  defp reported_lib_dir(elixir) do
+    case System.cmd(elixir, ["--eval", "IO.write(:code.lib_dir(:elixir))"]) do
+      {elixir_dir, 0} -> elixir_dir |> Path.expand() |> Path.dirname()
+      _ -> nil
+    end
+  end
+
+  # `<elixir>/bin/elixir` sits beside `<elixir>/lib/mix/ebin`.
+  defp sibling_lib_dir(elixir) do
+    lib_dir = elixir |> Path.dirname() |> Path.join("..") |> Path.join("lib") |> Path.expand()
+    if File.dir?(lib_dir), do: lib_dir
   end
 
   defp add_lib(app, lib_dir) do

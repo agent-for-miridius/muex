@@ -52,6 +52,24 @@ defmodule Muex.MixBootstrapTest do
       assert :ok = MixBootstrap.start(Path.join(tmp_dir, "missing.exs"))
       assert Mix.Project.get() == nil
     end
+
+    # Version managers such as mise and asdf put a shim on PATH that runs the
+    # real `elixir` from elsewhere, so there is no Elixir `lib` beside it.
+    test "finds Mix through a shim on PATH", %{tmp_dir: tmp_dir} do
+      real_elixir = Path.expand("../../bin/elixir", :code.lib_dir(:elixir))
+      shim_dir = Path.join(tmp_dir, "shims")
+      shim = Path.join(shim_dir, "elixir")
+      File.mkdir_p!(shim_dir)
+      File.write!(shim, "#!/bin/sh\nexec '#{real_elixir}' \"$@\"\n")
+      File.chmod!(shim, 0o755)
+
+      path = System.get_env("PATH")
+      System.put_env("PATH", shim_dir <> ":" <> path)
+      on_exit(fn -> System.put_env("PATH", path) end)
+
+      assert System.find_executable("elixir") == shim
+      assert :ok = MixBootstrap.start(Path.join(tmp_dir, "missing.exs"))
+    end
   end
 
   describe "load_project/1" do
