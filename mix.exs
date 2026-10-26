@@ -2,7 +2,7 @@ defmodule Muex.MixProject do
   use Mix.Project
 
   @app :muex
-  @version "0.11.3"
+  @version "0.12.0"
   @source_url "https://github.com/Oeditus/muex"
 
   def project do
@@ -35,7 +35,7 @@ defmodule Muex.MixProject do
 
   def application do
     [
-      extra_applications: [:logger, :mix, :syntax_tools, :tools],
+      extra_applications: [:logger, :syntax_tools, :tools],
       mod: {Muex.Application, []}
     ]
   end
@@ -52,6 +52,12 @@ defmodule Muex.MixProject do
     ]
   end
 
+  # The escript embeds Elixir but deliberately not Mix: Mix evaluates the
+  # `mix.exs` of the project it runs in, so it must be that project's Elixir
+  # version, not the one muex was built with. `Muex.MixBootstrap` starts the Mix
+  # that belongs to the `elixir` on PATH and loads the project's `mix.exs`.
+  # CI validates that the built escript runs a real project (see
+  # .github/workflows/escript.yml).
   def escript do
     [
       main_module: Muex.CLI,

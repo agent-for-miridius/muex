@@ -4,6 +4,10 @@ defmodule Muex.CLI do
 
   This module provides the escript entry point. It parses arguments via
   `Muex.Config.from_args/1` and delegates execution to `Muex.run/1`.
+
+  The escript carries Elixir but not Mix, and nothing has loaded the project it
+  is run in. `Muex.MixBootstrap` starts Mix and evaluates the project's
+  `mix.exs` first, so `muex` and `mix muex` see the same project.
   """
 
   @spec main([String.t()]) :: no_return()
@@ -41,36 +45,40 @@ defmodule Muex.CLI do
         System.halt(1)
 
       {:ok, config} ->
-        unless File.exists?("mix.exs") do
-          IO.puts(:stderr, "Error: No mix.exs found in current directory")
-          IO.puts(:stderr, "Please run muex from the root of an Elixir project")
-          System.halt(1)
-        end
-
-        Mix.start()
-        # An escript is not started by `mix`, so it loads the project itself.
-        Code.compile_file("mix.exs")
-        Mix.Task.run("loadconfig")
-        Mix.Task.run("loadpaths")
-        Mix.Task.run("compile", ["--no-deps-check"])
-
-        case Muex.run(config) do
-          {:ok, result} ->
-            if result.results == [], do: IO.puts("No mutations to test; nothing to score.")
-
-            case Muex.check_threshold(result, config.fail_at) do
-              :ok ->
-                System.halt(0)
-
-              {:error, reason} ->
-                IO.puts(:stderr, reason)
-                System.halt(1)
-            end
+        case Muex.MixBootstrap.load_project() do
+          :ok ->
+            run(config)
 
           {:error, reason} ->
-            IO.puts(:stderr, "Error: #{reason}")
+            IO.puts(:stderr, "Error: #{Muex.MixBootstrap.format_error(reason)}")
             System.halt(1)
         end
+    end
+  rescue
+    e ->
+      IO.puts(:stderr, "Error: #{Exception.message(e)}")
+      IO.puts(:stderr, Exception.format_stacktrace(__STACKTRACE__))
+      System.halt(1)
+  end
+
+  @spec run(Muex.Config.t()) :: no_return()
+  defp run(config) do
+    case Muex.run(config) do
+      {:ok, result} ->
+        if result.results == [], do: IO.puts("No mutations to test; nothing to score.")
+
+        case Muex.check_threshold(result, config.fail_at) do
+          :ok ->
+            System.halt(0)
+
+          {:error, reason} ->
+            IO.puts(:stderr, reason)
+            System.halt(1)
+        end
+
+      {:error, reason} ->
+        IO.puts(:stderr, "Error: #{reason}")
+        System.halt(1)
     end
   rescue
     e ->
