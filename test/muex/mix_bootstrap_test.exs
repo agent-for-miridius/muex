@@ -7,7 +7,9 @@ defmodule Muex.MixBootstrapTest do
 
   setup do
     # Every test loads a project into the global Mix.ProjectStack; clear it
-    # afterwards so one test's project cannot answer for the next.
+    # before and after, so neither the project `mix test` itself pushed nor one
+    # test's project can answer for the next.
+    Mix.ProjectStack.clear_stack()
     on_exit(fn -> Mix.ProjectStack.clear_stack() end)
   end
 
