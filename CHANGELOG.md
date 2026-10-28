@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **First Mutant per Sandbox Timing Out**: In a plain (non-umbrella) project, each sandbox's first mutant compiled the whole app inside its timeout. muex now compiles every sandbox once, in parallel, before the first mutant, as it already did for umbrellas.
+- **Crash After a Timed-Out Baseline**: When a `mix test` run timed out, output it printed while being killed stayed in the caller's mailbox. In an umbrella the worker pool runs the baseline itself and crashed on that output with a `FunctionClauseError`, which could take down the run before its error was shown. The leftover output is now discarded.
 - **`mix test` Outliving the Run**: When the worker pool stopped while mutants were running, it removed the sandboxes and left each `mix test` running, which wrote its build files back into the removed tree. The pool now kills each running `mix test` first.
 - **Temp Dir Leftovers**: A muex that was killed left its sandbox pool and `mix test` runner scripts in the temp dir. Each name now holds the muex process's OS pid, and a new run removes those whose process is gone.
 - **Elixir Version in Plain Sandboxes**: A plain project's sandbox did not link `.tool-versions`, `mise.toml` and the other mise files, so a version manager's `elixir` shim run there could pick another version than the project pins. The sandbox now links them, as an umbrella sandbox already did.

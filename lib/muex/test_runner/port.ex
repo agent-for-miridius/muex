@@ -211,10 +211,22 @@ defmodule Muex.TestRunner.Port do
       max(deadline - System.monotonic_time(:millisecond), 0) ->
         kill_os_process(port)
         safe_close(port)
+        flush(port)
         {:error, :timeout}
     end
   rescue
     e -> {:error, e}
+  end
+
+  # Output the run printed while it was being killed is still in the mailbox.
+  # Left there, it reaches a caller that does not expect it: the worker pool,
+  # which runs the baseline itself, crashed on it.
+  defp flush(port) do
+    receive do
+      {^port, _} -> flush(port)
+    after
+      0 -> :ok
+    end
   end
 
   defp deadline(ms), do: System.monotonic_time(:millisecond) + ms

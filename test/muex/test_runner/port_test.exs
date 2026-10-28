@@ -95,6 +95,28 @@ defmodule Muex.TestRunner.PortTest do
                PortRunner.run_tests([], timeout_ms: 1_000, startup_timeout_ms: 3_000, cd: tmp_dir)
     end
 
+    # Output that arrived while the timed-out run was being killed used to stay
+    # in the caller's mailbox. The worker pool, which runs the baseline itself,
+    # then crashed on it. The test prints until it is killed.
+    test "a run that times out leaves none of its output in the mailbox",
+         %{tmp_dir: tmp_dir} do
+      write_project!(
+        tmp_dir,
+        "",
+        ~s|Stream.repeatedly(fn -> IO.puts("busy"); Process.sleep(1) end) \|> Stream.run()|
+      )
+
+      assert {:error, :timeout} =
+               PortRunner.run_tests([],
+                 timeout_ms: 1_000,
+                 startup_timeout_ms: 60_000,
+                 cd: tmp_dir
+               )
+
+      {:messages, messages} = Process.info(self(), :messages)
+      assert Enum.filter(messages, &match?({port, _} when is_port(port), &1)) == []
+    end
+
     defp write_project!(dir, before_start, test_body) do
       name = "MuexTimeout#{System.unique_integer([:positive])}"
 
