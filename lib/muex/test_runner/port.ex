@@ -26,7 +26,8 @@ defmodule Muex.TestRunner.Port do
     - `opts` - Options:
       - `:timeout_ms` - How long ExUnit may run the tests, in milliseconds,
         counted from the moment the suite starts (default: 5000). Starting
-        the VM, compiling and starting the app are not counted.
+        the VM, compiling and starting the app are not counted. Neither is
+        killing a run that timed out, which comes on top.
       - `:startup_timeout_ms` - How long the run may take before the suite
         starts, and after it finishes (default: the larger of 60 s and six
         times `:timeout_ms`). Bounds a mutant that hangs while compiling or
@@ -187,6 +188,10 @@ defmodule Muex.TestRunner.Port do
   # `timeouts.startup` before it and after the suite finishes. Under load,
   # booting the VM and compiling take many times longer than the tests of a
   # small project, and a healthy mutant timed out before its tests began.
+  #
+  # Any other message stays in the mailbox: the worker pool runs the baseline
+  # inside handle_call/3, and a call, cast or system message reaching it
+  # meanwhile must still be handled once the run ends.
   defp collect_output(port, acc, timeouts, deadline) do
     receive do
       {^port, {:data, data}} when is_binary(data) ->
@@ -204,9 +209,6 @@ defmodule Muex.TestRunner.Port do
         kill_os_process(port)
         safe_close(port)
         exit(reason)
-
-      _msg ->
-        collect_output(port, acc, timeouts, deadline)
     after
       max(deadline - System.monotonic_time(:millisecond), 0) ->
         kill_os_process(port)

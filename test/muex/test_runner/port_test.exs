@@ -56,6 +56,18 @@ defmodule Muex.TestRunner.PortTest do
       assert String.valid?(output)
       assert output =~ "�"
     end
+
+    # The worker pool runs the baseline itself, so a call, cast or system
+    # message reaching it during the run used to be thrown away.
+    @tag :tmp_dir
+    test "leaves messages that are not the run's in the mailbox", %{tmp_dir: tmp_dir} do
+      write_project!(tmp_dir, "", "assert true")
+      send(self(), {:"$gen_call", {self(), make_ref()}, :not_the_run})
+
+      assert {:ok, %{failures: 0}} = PortRunner.run_tests([], timeout_ms: 30_000, cd: tmp_dir)
+
+      assert_received {:"$gen_call", _from, :not_the_run}
+    end
   end
 
   # The timeout covers the tests only. Booting, compiling and starting the app

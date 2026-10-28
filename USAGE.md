@@ -343,7 +343,8 @@ Default: Number of CPU schedulers (`System.schedulers_online()`)
 Prevent hanging tests. The timeout counts from the moment ExUnit starts the
 suite, so starting the VM, compiling and starting the app are not counted.
 Those, and anything after the suite ends, are bounded separately by the larger
-of 60 seconds and six times `--timeout`.
+of 60 seconds and six times `--timeout`. Killing a run that timed out, with
+every process it started, comes on top of either bound.
 
 ```bash
 # 10 second timeout per mutation
