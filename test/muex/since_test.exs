@@ -10,6 +10,8 @@ defmodule Muex.SinceTest do
   @moduletag :tmp_dir
   @moduletag timeout: 180_000
 
+  setup {Muex.TestCwd, :restore_on_exit}
+
   # The project sits in a subdirectory of its repository, as an umbrella inside a
   # monorepo does, and is loaded from relative paths, as `mix muex` run from the
   # project root loads it. Git names the changed file project/lib/tiny.ex; muex

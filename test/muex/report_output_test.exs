@@ -10,6 +10,8 @@ defmodule Muex.ReportOutputTest do
   @moduletag :tmp_dir
   @moduletag timeout: 180_000
 
+  setup {Muex.TestCwd, :restore_on_exit}
+
   test "--output writes the report to the file and records each mutant's test files",
        %{tmp_dir: tmp_dir} do
     project = write_tiny_project!(tmp_dir)

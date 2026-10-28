@@ -11,6 +11,8 @@ defmodule Muex.StagedTest do
   @moduletag :tmp_dir
   @moduletag timeout: 180_000
 
+  setup {Muex.TestCwd, :restore_on_exit}
+
   # Clears the hook variables before touching git, so a run from a hook does
   # not send the scratch repository's commands to the hook's repository.
   setup %{tmp_dir: tmp_dir} do

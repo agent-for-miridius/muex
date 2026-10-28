@@ -5,6 +5,8 @@ defmodule Muex.Reporter.JsonTest do
 
   @moduletag :tmp_dir
 
+  setup {Muex.TestCwd, :restore_on_exit}
+
   describe "to_json/1" do
     test "generates valid JSON with summary" do
       results = [
