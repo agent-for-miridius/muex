@@ -28,6 +28,9 @@ defmodule Muex.Mutator.FunctionCall do
   alias Muex.Mutator.References
 
   @commutative_ops [:+, :*, :==, :!=, :===, :!==, :and, :or, :&&, :||]
+  # Swapped, these differ only when the arguments compare equal but are not
+  # identical (`max(1, 1.0)`), which tests hardly ever check.
+  @commutative_functions [:max, :min]
   @impl true
   def name do
     "FunctionCall"
@@ -69,14 +72,22 @@ defmodule Muex.Mutator.FunctionCall do
 
   @impl true
   def equivalent?(%{description: description, ast: {func, _, _}}) when is_atom(func) do
-    String.contains?(description, "swap arguments") and func in @commutative_ops
+    String.contains?(description, "swap arguments") and
+      (func in @commutative_ops or func in @commutative_functions)
   end
 
-  def equivalent?(%{description: description, ast: {{:., _, [_, func]}, _, _}}) do
-    String.contains?(description, "swap arguments") and func in @commutative_ops
+  def equivalent?(%{description: description, ast: {{:., _, [module, func]}, _, _}}) do
+    String.contains?(description, "swap arguments") and
+      (func in @commutative_ops or
+         (func in @commutative_functions and kernel?(module)))
   end
 
   def equivalent?(_mutation), do: false
+
+  # Other modules' max and min, such as `Enum.max(list, fn -> 0 end)`, are
+  # not commutative.
+  defp kernel?({:__aliases__, _, [:Kernel]}), do: true
+  defp kernel?(module), do: module == :erlang
 
   defp special_form?(func) do
     func in [

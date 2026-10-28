@@ -323,6 +323,40 @@ defmodule Muex.Mutator.FunctionCallTest do
       assert FunctionCall.equivalent?(mutation)
     end
 
+    test "returns true for swapping arguments of max and min" do
+      for func <- [:max, :min] do
+        mutation = %{
+          description: "FunctionCall: swap arguments in #{func}()",
+          ast: {func, [], [:b, :a]},
+          mutator: FunctionCall
+        }
+
+        assert FunctionCall.equivalent?(mutation)
+      end
+    end
+
+    test "returns true for swapping arguments of Kernel.max and :erlang.min" do
+      for {module, func} <- [{{:__aliases__, [], [:Kernel]}, :max}, {:erlang, :min}] do
+        mutation = %{
+          description: "FunctionCall: swap arguments in #{inspect(module)}.#{func}()",
+          ast: {{:., [], [module, func]}, [], [:b, :a]},
+          mutator: FunctionCall
+        }
+
+        assert FunctionCall.equivalent?(mutation)
+      end
+    end
+
+    test "returns false for swapping arguments of Enum.max" do
+      mutation = %{
+        description: "FunctionCall: swap arguments in Enum.max()",
+        ast: {{:., [], [{:__aliases__, [], [:Enum]}, :max]}, [], [:b, :a]},
+        mutator: FunctionCall
+      }
+
+      refute FunctionCall.equivalent?(mutation)
+    end
+
     test "returns false for when operator" do
       mutation = %{
         description: "FunctionCall: swap arguments in when()",

@@ -512,10 +512,12 @@ pass are printed only with `--verbose`.
 ### Equivalent Mutant Handling
 
 Some mutations cannot change observable behaviour, so no test could ever kill
-them. Counting them as survivors would deflate the score, so Muex drops them
-soundly (it never drops a killable mutant):
+them. Counting them as survivors would deflate the score, so Muex drops them:
 
 - AST identity rules (for example `a + 0` vs `a - 0`, `x <<< 0` vs `x >>> 0`).
+- Swapped arguments of commutative calls (`+`, `==`, `max`, `min`, ...). This
+  also drops a `max` or `min` swap that a test could kill only with arguments
+  that compare equal but differ, such as `max(1, 1.0)`.
 - Trivial Compiler Equivalence (TCE): mutants that compile to byte-identical
   BEAM, such as deleting a `@moduledoc`.
 

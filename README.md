@@ -243,12 +243,13 @@ See `examples/cart/OPTIMIZATION_RESULTS.md` for complete analysis.
 
 ## Equivalent Mutants, Coverage, and Incremental Runs
 
-In addition to the (lossy) optimizer above, Muex applies sound, always-on
-handling that never hides a killable mutant:
+In addition to the (lossy) optimizer above, Muex applies always-on handling:
 
 - **Equivalent-mutant detection**: AST identity rules (`a + 0` vs `a - 0`,
-  bitshift-by-zero) drop mutations that cannot change behaviour. They are
-  reported as `Equivalent` and excluded from the score.
+  bitshift-by-zero) drop mutations that cannot change behaviour, as do swapped
+  arguments of commutative calls. A `max` or `min` swap is dropped even though
+  `max(1, 1.0)` and `max(1.0, 1)` differ. They are reported as `Equivalent` and
+  excluded from the score.
 - **Trivial Compiler Equivalence (TCE)**: mutants that compile to byte-identical
   BEAM (for example, deleting a `@moduledoc`) are skipped. Disable with
   `--no-tce`.
