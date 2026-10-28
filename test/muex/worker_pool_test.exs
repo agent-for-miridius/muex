@@ -96,8 +96,10 @@ defmodule Muex.WorkerPoolTest do
       Process.register(self(), __MODULE__.BlockingAdapter)
       run = Task.async(fn -> run_with_adapter(tmp_dir, __MODULE__.BlockingAdapter, 2, 2) end)
 
-      # Building the sandboxes comes first and can take seconds.
-      assert_receive {:unparsing, first}, 10_000
+      # Building the sandboxes comes first. It starts `mix` three times, which
+      # takes about a second on an idle machine and tens of seconds on a busy
+      # one, so only the test's own timeout bounds it.
+      first = receive do: ({:unparsing, pid} -> pid)
       assert_receive {:unparsing, second}, 10_000
       Enum.each([first, second], &send(&1, :go))
 
