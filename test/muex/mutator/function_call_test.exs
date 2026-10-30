@@ -347,6 +347,19 @@ defmodule Muex.Mutator.FunctionCallTest do
       end
     end
 
+    # `false and raise("x")` is `false`; swapped, it raises.
+    test "returns false for swapping the operands of and, or, && and ||" do
+      for func <- [:and, :or, :&&, :||] do
+        mutation = %{
+          description: "FunctionCall: swap arguments in #{func}()",
+          ast: {func, [], [:b, :a]},
+          mutator: FunctionCall
+        }
+
+        refute FunctionCall.equivalent?(mutation)
+      end
+    end
+
     test "returns false for swapping arguments of Enum.max" do
       mutation = %{
         description: "FunctionCall: swap arguments in Enum.max()",
