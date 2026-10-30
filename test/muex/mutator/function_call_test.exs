@@ -360,6 +360,49 @@ defmodule Muex.Mutator.FunctionCallTest do
       end
     end
 
+    test "an and swap is equivalent only in a guard outside defguard" do
+      equivalent = fn source ->
+        source
+        |> Code.string_to_quoted!()
+        |> Muex.Mutator.walk([FunctionCall], %{file: "test.ex"})
+        |> Enum.filter(&String.starts_with?(&1.description, "FunctionCall: swap arguments in"))
+        |> Map.new(&{&1.description, Muex.Equivalence.equivalent?(&1)})
+      end
+
+      assert %{"FunctionCall: swap arguments in and()" => true} =
+               equivalent.("def f(x) when is_map(x) and map_size(x) > 0, do: x")
+
+      assert %{"FunctionCall: swap arguments in and()" => true} =
+               equivalent.("case x do\n  y when is_map(y) and map_size(y) > 0 -> y\nend")
+
+      assert %{"FunctionCall: swap arguments in and()" => true} =
+               equivalent.("def f(x) when is_map(x) and map_size(x) > 0 when is_nil(x), do: x")
+
+      # `when is_nil(x) or map_size(x) > 0` passes nil; swapped, it does not.
+      assert %{"FunctionCall: swap arguments in or()" => false} =
+               equivalent.("def f(x) when is_nil(x) or map_size(x) > 0, do: x")
+
+      # Swapped, `map_size(1)` fails the whole guard, which `not false` passed.
+      for guard <- [
+            "not (is_map(x) and map_size(x) > 0)",
+            "(is_map(x) and map_size(x) > 0) or is_nil(x)",
+            "(is_map(x) and map_size(x) > 0) == false"
+          ] do
+        assert %{"FunctionCall: swap arguments in and()" => false} =
+                 equivalent.("def f(x) when #{guard}, do: x")
+      end
+
+      for kind <- ["defguard", "defguardp"] do
+        assert %{"FunctionCall: swap arguments in and()" => false} =
+                 equivalent.("#{kind} g(x) when is_map(x) and map_size(x) > 0")
+      end
+
+      for op <- ["and", "or", "&&", "||"] do
+        swaps = equivalent.("def f(x), do: is_map(x) #{op} map_size(x) > 0")
+        assert Map.fetch!(swaps, "FunctionCall: swap arguments in #{op}()") == false
+      end
+    end
+
     test "returns false for swapping arguments of Enum.max" do
       mutation = %{
         description: "FunctionCall: swap arguments in Enum.max()",

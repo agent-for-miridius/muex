@@ -27,7 +27,9 @@ defmodule Muex.Mutator.FunctionCall do
 
   alias Muex.Mutator.References
 
-  @commutative_ops [:+, :*, :==, :!=, :===, :!==, :and, :or, :&&, :||]
+  # Not `and`, `or`, `&&` or `||`: `false and raise("x")` is `false`, but
+  # swapped it raises.
+  @commutative_ops [:+, :*, :==, :!=, :===, :!==]
   # Swapped, these differ only when the arguments compare equal but are not
   # identical (`max(1, 1.0)`), which tests hardly ever check.
   @commutative_functions [:max, :min]
@@ -157,17 +159,31 @@ defmodule Muex.Mutator.FunctionCall do
   defp swap(_ast, _name, _swappable?, %{module_body: _}, _line), do: []
 
   defp swap({call, meta, [first, second | rest]}, name, true, context, line) do
-    [
+    mutation =
       build_mutation(
         {call, meta, [second, first | rest]},
         "swap arguments in #{name}()",
         context,
         line
       )
-    ]
+
+    if equivalent_swap?(call, context),
+      do: [Map.put(mutation, :equivalent, true)],
+      else: [mutation]
   end
 
   defp swap(_ast, _name, _swappable?, _context, _line), do: []
+
+  # A guard clause passes only when both sides of a top-level `and` are true,
+  # and an error in either side fails the clause, so the swap passes and fails
+  # with the original. Not so below `not` or `or` (`when not (is_map(x) and
+  # map_size(x) > 0)`), where an error fails what `false` would pass, nor in a
+  # `defguard`, which can also be called outside a guard, where `false and
+  # raise("x")` is `false` but swapped raises.
+  defp equivalent_swap?(:and, %{guard_top: true} = context),
+    do: not Map.has_key?(context, :defguard)
+
+  defp equivalent_swap?(_call, _context), do: false
 
   # Kernel's sigils are macros that take the text first and the modifiers
   # second; swapped, they do not compile. Nor does `[1, 2] in x` in a guard,

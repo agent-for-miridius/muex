@@ -28,8 +28,7 @@ defmodule Muex.Equivalence do
   """
   @spec equivalent?(map()) :: boolean()
   def equivalent?(mutation) do
-    Map.get(mutation, :equivalent, false) or
-      ast_pattern_equivalent?(mutation) or
+    ast_pattern_equivalent?(mutation) or
       Muex.Mutator.equivalent?(mutation)
   end
 

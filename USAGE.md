@@ -518,7 +518,9 @@ them. Counting them as survivors would deflate the score, so Muex drops them:
 - AST identity rules (for example `a + 0` vs `a - 0`, `x <<< 0` vs `x >>> 0`).
 - Swapped arguments of commutative calls (`+`, `==`, `max`, `min`, ...). This
   also drops a `max` or `min` swap that a test could kill only with arguments
-  that compare equal but differ, such as `max(1, 1.0)`.
+  that compare equal but differ, such as `max(1, 1.0)`. Swapped operands of
+  `and`, `or`, `&&` and `||` are run, apart from a guard's top-level `and`
+  outside a `defguard`.
 - Trivial Compiler Equivalence (TCE): mutants that compile to byte-identical
   BEAM, such as deleting a `@moduledoc`.
 

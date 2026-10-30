@@ -247,7 +247,8 @@ In addition to the (lossy) optimizer above, Muex applies always-on handling:
 
 - **Equivalent-mutant detection**: AST identity rules (`a + 0` vs `a - 0`,
   bitshift-by-zero) drop mutations that cannot change behaviour, as do swapped
-  arguments of commutative calls. A `max` or `min` swap is dropped even though
+  arguments of commutative calls and of a guard's top-level `and` outside a
+  `defguard`. A `max` or `min` swap is dropped even though
   `max(1, 1.0)` and `max(1.0, 1)` differ. They are reported as `Equivalent` and
   excluded from the score.
 - **Trivial Compiler Equivalence (TCE)**: mutants that compile to byte-identical

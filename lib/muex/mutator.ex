@@ -133,21 +133,17 @@ defmodule Muex.Mutator do
   @optional_callbacks [equivalent?: 1]
 
   @doc """
-  Checks whether a mutation is equivalent, delegating to the mutator module.
-
-  Falls back to checking the `:equivalent` key in the mutation map if the
-  mutator does not implement `equivalent?/1`.
+  Checks whether a mutation is equivalent: whether its `:equivalent` key is
+  `true`, or else whether its mutator's `equivalent?/1`, if it has one, says
+  so.
   """
   @spec equivalent?(mutation()) :: boolean()
   def equivalent?(%{mutator: mutator} = mutation) do
-    if function_exported?(mutator, :equivalent?, 1) do
-      mutator.equivalent?(mutation)
-    else
-      Map.get(mutation, :equivalent, false)
-    end
+    Map.get(mutation, :equivalent, false) or
+      (function_exported?(mutator, :equivalent?, 1) and mutator.equivalent?(mutation))
   end
 
-  def equivalent?(_mutation), do: false
+  def equivalent?(mutation), do: Map.get(mutation, :equivalent, false)
 
   # Directives whose entire subtree is compile-time metadata, never a
   # runtime value. Mutating them yields invalid mutants.
@@ -235,7 +231,11 @@ defmodule Muex.Mutator do
   can leave alone what is only valid as an expression. Patterns are a
   definition's parameters, the left of `=` and `<-`, and the left of `->`
   except in `cond` and a `receive`'s `after`. A guard is an expression, walked
-  with `context[:guard]` set to `true`. The `<<>>` of a bitstring generator
+  with `context[:guard]` set to `true`, and a `defguard` or `defguardp`'s
+  guard also with `context[:defguard]` set to `true`, since it can be called
+  outside a guard too. A guard clause's top-level nodes, the guard itself and
+  the operands of a top-level `and` or `when`, also have
+  `context[:guard_top]` set to `true`. The `<<>>` of a bitstring generator
   (`for <<b <- bin>>`) is not offered.
 
   A node that cannot be replaced by a value is offered with
@@ -312,6 +312,7 @@ defmodule Muex.Mutator do
         |> enter_struct(node)
         |> enter_module(node, path)
         |> enter_quote(node)
+        |> enter_guard_operand(node)
 
       mutations ++ collect_children(node, mutators, children_context, skip_calls, path)
     end
@@ -366,6 +367,14 @@ defmodule Muex.Mutator do
        do: Map.put(context, :module_body, statements)
 
   defp enter_quote(context, _node), do: context
+
+  # An error in a guard fails its whole clause, so an `and`'s operands, and
+  # each clause of `a when b`, are top-level only when the node is.
+  defp enter_guard_operand(%{guard_top: true} = context, {form, _meta, [_left, _right]})
+       when form in [:and, :when],
+       do: context
+
+  defp enter_guard_operand(context, _node), do: Map.delete(context, :guard_top)
 
   defp enter_body(context, body, body_path) do
     {statements, paths} =
@@ -515,7 +524,10 @@ defmodule Muex.Mutator do
     context = Map.drop(context, [:module_body, :statement_paths])
     body_context = enter_macro(context, kind, rest, path)
 
-    collect_head(head, mutators, context, skip_calls, below(path, [2, 0])) ++
+    head_context =
+      if kind in [:defguard, :defguardp], do: Map.put(context, :defguard, true), else: context
+
+    collect_head(head, mutators, head_context, skip_calls, below(path, [2, 0])) ++
       (rest
        |> Enum.with_index(1)
        |> Enum.flat_map(fn {node, index} ->
@@ -857,9 +869,17 @@ defmodule Muex.Mutator do
   defp collect_pattern(pattern, mutators, context, skip_calls, path),
     do: collect(pattern, mutators, Map.put(context, :pattern, true), skip_calls, path)
 
-  # Walk a guard, telling mutators so through `context[:guard]`.
+  # Walk a guard, telling mutators so through `context[:guard]`, and which of
+  # its nodes are top-level through `context[:guard_top]`.
   defp collect_guard(guard, mutators, context, skip_calls, path),
-    do: collect(guard, mutators, Map.put(context, :guard, true), skip_calls, path)
+    do:
+      collect(
+        guard,
+        mutators,
+        Map.merge(context, %{guard: true, guard_top: true}),
+        skip_calls,
+        path
+      )
 
   # The left operand of `/` in `&(left / arity)` when Elixir reads the capture
   # as a function reference: `:remote` for `Mod.fun` (no arguments), `:local`

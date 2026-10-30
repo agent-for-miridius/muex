@@ -69,6 +69,18 @@ defmodule Muex.EquivalenceTest do
       assert Equivalence.equivalent?(%{ast: :a, original_ast: :b, equivalent: true})
     end
 
+    test "Muex.Mutator.equivalent?/1 honours the flag when the mutator has equivalent?/1" do
+      flagged = %{
+        ast: :a,
+        mutator: Muex.Mutator.FunctionCall,
+        description: "FunctionCall: swap arguments in and()",
+        equivalent: true
+      }
+
+      assert Muex.Mutator.equivalent?(flagged)
+      refute Muex.Mutator.equivalent?(Map.delete(flagged, :equivalent))
+    end
+
     test "is false for an ordinary, non-equivalent mutation" do
       refute Equivalence.equivalent?(mutation(quoted("a > b"), quoted("a < b")))
     end
